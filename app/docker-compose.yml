@@ -1,0 +1,24 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  myapp:
+    build: .
+    volumes:
+      - ../config/config1.json:/app/config.json  # Gắn file config1.json vào container
+    ports:
+      - "30303:30303"  # Mở cổng 30304
+
+  myapp2:  # Dịch vụ mới
+    build: .
+    volumes:
+      - ../config/config2.json:/app/config.json  # Gắn file config.json vào container
+    ports:
+      - "30304:30303"  # Mở cổng 30305
+
+  myapp3:  # Dịch vụ mới
+    build: .
+    volumes:
+      - ../config/config3.json:/app/config.json  # Gắn file config.json vào container
+    ports:
+      - "30305:30303"  # Mở cổng 30306
