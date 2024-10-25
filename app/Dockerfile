@@ -1,5 +1,5 @@
 # Dockerfile
-FROM golang:1.23.1
+FROM golang:1.23.2
 
 # Thiết lập thư mục làm việc
 WORKDIR /app
@@ -11,7 +11,7 @@ COPY . .
 RUN go mod tidy
 
 # Biên dịch ứng dụng
-RUN go build -o myapp .
+RUN go build -o node ./cmd/node.go
 
 # Chạy ứng dụng
-CMD ["./myapp"]
+CMD ["./node"]
