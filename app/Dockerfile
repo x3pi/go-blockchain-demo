@@ -11,7 +11,7 @@ COPY . .
 RUN go mod tidy
 
 # Biên dịch ứng dụng
-RUN go build -o node ./cmd/node.go
+RUN go build -o node ./cmd/node/node.go
 
 # Chạy ứng dụng
 CMD ["./node"]

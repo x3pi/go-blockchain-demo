@@ -11,7 +11,7 @@ func GetGenesisBlock() Block {
 		Version:             1,
 		PreviousBlockHeader: "",
 		MerkleRoot:          "0x1bc3300000000000000000000000000000000000000000000",
-		Time:                time.Now().Unix(),
+		Time:                uint64(time.Now().Unix()),
 	}
 	return Block{BlockHeader: blockHeader, Index: 0, Txns: nil}
 }
