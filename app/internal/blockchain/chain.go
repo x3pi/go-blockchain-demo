@@ -24,9 +24,8 @@ const (
 )
 
 var (
-	blockchain []Block
-	tr         *trie.Trie
-	db         *leveldb.Database // Xuất biến db
+	tr *trie.Trie
+	db *leveldb.Database // Xuất biến db
 )
 
 func GetGenesisBlock() Block {
@@ -37,24 +36,6 @@ func GetGenesisBlock() Block {
 		Time:                uint64(time.Now().Unix()),
 	}
 	return Block{BlockHeader: blockHeader, Index: 0, Txns: nil}
-}
-
-func GetLatestBlock() Block {
-	return blockchain[len(blockchain)-1]
-}
-
-func AddBlock(newBlock Block) {
-	prevBlock := GetLatestBlock()
-	if prevBlock.Index < newBlock.Index && newBlock.BlockHeader.PreviousBlockHeader == prevBlock.BlockHeader.MerkleRoot {
-		blockchain = append(blockchain, newBlock)
-	}
-}
-
-func GetBlock(index int) *Block {
-	if len(blockchain)-1 >= index {
-		return &blockchain[index]
-	}
-	return nil
 }
 
 // Khởi tạo LevelDB
@@ -68,7 +49,7 @@ func CreateNewTrie(db *triedb.Database) (*trie.Trie, error) {
 }
 
 // Lưu block vào trie
-func SaveBlockToTrie(tr *trie.Trie, block Block, index int) error {
+func SaveBlockToTrie(block Block, index int) error {
 	blockJSON, err := json.Marshal(block)
 	if err != nil {
 		return err
@@ -188,7 +169,7 @@ func Init() {
 			Index: uint64(0),
 			Txns:  []string{fmt.Sprintf("tx_%d_1", 0), fmt.Sprintf("tx_%d_2", 0)},
 		}
-		if err := SaveBlockToTrie(tr, block, 0); err != nil {
+		if err := SaveBlockToTrie(block, 0); err != nil {
 			fmt.Printf("Lỗi khi lưu block: %v\n", err)
 			return
 		}
