@@ -16,11 +16,16 @@ type Config struct {
 
 func main() {
 	// Khởi tạo blockchain
-	blockchain.Init()
-
+	bc := blockchain.GetInstance()
+	if err := bc.Init(); err != nil {
+		log.Fatalf("Không thể khởi tạo blockchain: %v", err)
+	}
 	// Lấy khối genesis
-	genesisBlock := blockchain.GetGenesisBlock()
-	log.Printf("Khối Genesis: %+v\n", genesisBlock)
+	lastBlock, err := bc.GetLastBlock()
+	if err != nil {
+		log.Fatalf("Không thể lấy khối genesis: %v", err)
+	}
+	log.Printf("Khối Genesis: %+v\n", lastBlock)
 
 	// Đọc file cấu hình
 	configFile, err := os.ReadFile("config.json")
@@ -52,6 +57,7 @@ func main() {
 	if err := p2pNet.Start(); err != nil {
 		log.Fatalf("Không thể khởi động P2P network: %v", err)
 	}
+	log.Printf("P2P network đã khởi động thành công với địa chỉ lắng nghe %s", p2pConfig.ListenAddr)
 	defer p2pNet.Stop()
 
 	// Chạy vô hạn để giữ chương trình hoạt động

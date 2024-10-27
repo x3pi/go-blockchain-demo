@@ -17,6 +17,7 @@ type P2PNetwork struct {
 	Config     *Config
 	Server     *p2p.Server
 	PrivateKey *ecdsa.PrivateKey
+	blockchain *blockchain.Blockchain // Thêm trường này
 }
 
 type Config struct {
@@ -36,6 +37,7 @@ func NewP2PNetwork(config *Config) (*P2PNetwork, error) {
 	return &P2PNetwork{
 		Config:     config,
 		PrivateKey: nodekey,
+		blockchain: blockchain.GetInstance(),
 	}, nil
 }
 
@@ -62,7 +64,7 @@ func (p *P2PNetwork) Start() error {
 	blockProto := p2p.Protocol{
 		Name:    "block",
 		Version: 1,
-		Length:  2, // Tăng length lên 2 để hỗ trợ 2 loại tin nhắn
+		Length:  4, // Tăng length lên 2 để hỗ trợ 2 loại tin nhắn
 		Run:     p.runBlockProtocol,
 	}
 
@@ -120,18 +122,27 @@ func (p *P2PNetwork) runBlockProtocol(peer *p2p.Peer, rw p2p.MsgReadWriter) erro
 		}
 		time.Sleep(nextRun.Sub(now))
 
-		// Gửi yêu cầu lấy block
+		// Gửi yêu cầu lấy block với xử lý lỗi tốt hơn
 		blockID := fmt.Sprintf("block_%d", time.Now().Unix())
 		request := BlockRequest{
 			Type:    "request",
 			BlockID: blockID,
 		}
-		err := p2p.Send(rw, BlockRequestMsg, request)
-		if err != nil {
+		if err := p2p.Send(rw, BlockRequestMsg, request); err != nil {
 			log.Printf("Lỗi khi gửi yêu cầu block đến %v: %v\n", peer.ID(), err)
 			continue
 		}
-		log.Printf("Đã gửi yêu cầu block %s đến %v\n", blockID, peer.ID())
+		log.Printf("Đã gửi yêu cầu block %s đến %v thành công\n", blockID, peer.ID())
+
+		// Gửi yêu cầu last block với xử lý lỗi tốt hơn
+		lastBlockRequest := BlockRequest{
+			Type: "last_block",
+		}
+		if err := p2p.Send(rw, LastBlockRequestMsg, lastBlockRequest); err != nil {
+			log.Printf("Lỗi khi gửi yêu cầu last block đến %v: %v\n", peer.ID(), err)
+			return err // Return error to potentially restart the protocol
+		}
+		log.Printf("Đã gửi yêu cầu last block đến %v thành công\n", peer.ID())
 	}
 }
 
@@ -150,6 +161,10 @@ func (p *P2PNetwork) handleIncomingBlockMessages(peer *p2p.Peer, rw p2p.MsgReadW
 				log.Printf("Lỗi khi giải mã yêu cầu block: %v\n", err)
 				continue
 			}
+			// Add logging for block request
+			log.Printf("Nhận được yêu cầu block từ %v:\n", peer.ID())
+			log.Printf("  Type: %s\n", request.Type)
+			log.Printf("  BlockID: %s\n", request.BlockID)
 			// Xử lý yêu cầu và gửi block
 			currentTime := time.Now().Unix()
 			block := blockchain.Block{
@@ -167,21 +182,35 @@ func (p *P2PNetwork) handleIncomingBlockMessages(peer *p2p.Peer, rw p2p.MsgReadW
 			if err != nil {
 				log.Printf("Lỗi khi gửi block đến %v: %v\n", peer.ID(), err)
 			}
+
+		case LastBlockRequestMsg:
+			lastBlock, err := p.blockchain.GetLastBlock()
+			if err != nil {
+				log.Printf("Lỗi khi lấy last block: %v\n", err)
+				continue
+			}
+			err = p2p.Send(rw, LastBlockResponseMsg, lastBlock)
+			if err != nil {
+				log.Printf("Lỗi khi gửi last block đến %v: %v\n", peer.ID(), err)
+			}
+
 		case BlockResponseMsg:
 			var block blockchain.Block
 			if err := msg.Decode(&block); err != nil {
 				log.Printf("Lỗi khi giải mã block: %v\n", err)
 				continue
 			}
-			// In thông tin block nhận được
-			log.Printf("Nhận được block từ %v:\n", peer.ID())
-			log.Printf("  Index: %d\n", block.Index)
-			log.Printf("  Version: %d\n", block.BlockHeader.Version)
-			log.Printf("  PreviousBlockHeader: %s\n", block.BlockHeader.PreviousBlockHeader)
-			log.Printf("  MerkleRoot: %s\n", block.BlockHeader.MerkleRoot)
-			log.Printf("  Time: %d\n", block.BlockHeader.Time)
-			log.Printf("  Signature: %s\n", block.BlockHeader.Signature)
-			log.Printf("  Transactions: %v\n", block.Txns)
+			// Xử lý block thông thường
+			p.handleBlockResponse(peer, block)
+
+		case LastBlockResponseMsg:
+			var block blockchain.Block
+			if err := msg.Decode(&block); err != nil {
+				log.Printf("Lỗi khi giải mã last block: %v\n", err)
+				continue
+			}
+			// Xử lý last block
+			p.handleLastBlockResponse(peer, block)
 		}
 	}
 }
@@ -196,4 +225,28 @@ type BlockRequest struct {
 const (
 	BlockRequestMsg uint64 = iota
 	BlockResponseMsg
+	LastBlockRequestMsg
+	LastBlockResponseMsg
 )
+
+// Thêm các hàm xử lý mới
+func (p *P2PNetwork) handleBlockResponse(peer *p2p.Peer, block blockchain.Block) {
+	log.Printf("Nhận được block từ %v:\n", peer.ID())
+	p.logBlockInfo(block)
+}
+
+func (p *P2PNetwork) handleLastBlockResponse(peer *p2p.Peer, block blockchain.Block) {
+	log.Printf("Nhận được last block từ %v:\n", peer.ID())
+	p.logBlockInfo(block)
+	// TODO: Thêm xử lý đặc biệt cho last block ở đây
+}
+
+func (p *P2PNetwork) logBlockInfo(block blockchain.Block) {
+	log.Printf("  Index: %d\n", block.Index)
+	log.Printf("  Version: %d\n", block.BlockHeader.Version)
+	log.Printf("  PreviousBlockHeader: %s\n", block.BlockHeader.PreviousBlockHeader)
+	log.Printf("  MerkleRoot: %s\n", block.BlockHeader.MerkleRoot)
+	log.Printf("  Time: %d\n", block.BlockHeader.Time)
+	log.Printf("  Signature: %s\n", block.BlockHeader.Signature)
+	log.Printf("  Transactions: %v\n", block.Txns)
+}
