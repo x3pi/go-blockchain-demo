@@ -16,9 +16,17 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/errors"
 )
 
+// Define constants for database keys
+const (
+	ROOT_HASH     = "ROOT_HASH"
+	CURRENT_BLOCK = "CURRENT_BLOCK"
+	LAST_BLOCK    = "LAST_BLOCK"
+)
+
 var (
 	blockchain []Block
-	tr         *trie.Trie // Moved tr to package-level variable
+	tr         *trie.Trie
+	db         *leveldb.Database // Xuất biến db
 )
 
 func GetGenesisBlock() Block {
@@ -90,6 +98,58 @@ func GetBlockFromTrie(tr *trie.Trie, key []byte) (Block, error) {
 	return block, err
 }
 
+// Save the current block to CURRENT_BLOCK in the database
+func SaveCurrentBlock(block Block) error {
+	blockJSON, err := json.Marshal(block)
+	if err != nil {
+		return err
+	}
+	if err := db.Put([]byte(CURRENT_BLOCK), blockJSON); err != nil {
+		return fmt.Errorf("lỗi khi lưu CURRENT_BLOCK: %v", err)
+	}
+	return nil
+}
+
+// Save the current block to LAST_BLOCK in the database
+func SaveLastBlock(block Block) error {
+	blockJSON, err := json.Marshal(block)
+	if err != nil {
+		return err
+	}
+	if err := db.Put([]byte(LAST_BLOCK), blockJSON); err != nil {
+		return fmt.Errorf("lỗi khi lưu LAST_BLOCK: %v", err)
+	}
+	return nil
+}
+
+// Get the current block from CURRENT_BLOCK in the database
+func GetCurrentBlock() (Block, error) {
+	blockJSON, err := db.Get([]byte(CURRENT_BLOCK))
+	if err != nil {
+		return Block{}, fmt.Errorf("lỗi khi lấy CURRENT_BLOCK: %v", err)
+	}
+	var block Block
+	err = json.Unmarshal(blockJSON, &block)
+	if err != nil {
+		return Block{}, fmt.Errorf("lỗi khi giải mã CURRENT_BLOCK: %v", err)
+	}
+	return block, nil
+}
+
+// Get the last block from LAST_BLOCK in the database
+func GetLastBlock() (Block, error) {
+	blockJSON, err := db.Get([]byte(LAST_BLOCK))
+	if err != nil {
+		return Block{}, fmt.Errorf("lỗi khi lấy LAST_BLOCK: %v", err)
+	}
+	var block Block
+	err = json.Unmarshal(blockJSON, &block)
+	if err != nil {
+		return Block{}, fmt.Errorf("lỗi khi giải mã LAST_BLOCK: %v", err)
+	}
+	return block, nil
+}
+
 func Init() {
 	currentDir, err := os.Getwd()
 	if err != nil {
@@ -98,15 +158,15 @@ func Init() {
 	}
 	dbPath := filepath.Join(currentDir, "leveldb_data")
 
-	db, err := InitLevelDB(dbPath)
+	db, err = InitLevelDB(dbPath) // Use the existing err variable
 	if err != nil {
 		fmt.Printf("Lỗi khi tạo LevelDB: %v\n", err)
 		return
 	}
-	defer db.Close()
+	defer db.Close() // Remove this line if you want db to exist after the function ends
 
 	trieDB := triedb.NewDatabase(rawdb.NewDatabase(db), &triedb.Config{})
-	rootKey := []byte("ROOT_HASH")
+	rootKey := []byte(ROOT_HASH) // Use the constant for ROOT_HASH
 	rootHash, err := db.Get(rootKey)
 
 	if err == errors.ErrNotFound {
@@ -131,6 +191,14 @@ func Init() {
 		if err := SaveBlockToTrie(tr, block, 0); err != nil {
 			fmt.Printf("Lỗi khi lưu block: %v\n", err)
 			return
+		}
+
+		// Call the new functions to save CURRENT_BLOCK and LAST_BLOCK
+		if err := SaveCurrentBlock(block); err != nil {
+			fmt.Printf("Lỗi khi lưu CURRENT_BLOCK: %v\n", err)
+		}
+		if err := SaveLastBlock(block); err != nil {
+			fmt.Printf("Lỗi khi lưu LAST_BLOCK: %v\n", err)
 		}
 
 		root, nodes := tr.Commit(false)
@@ -176,4 +244,18 @@ func Init() {
 	}
 
 	fmt.Printf("Root hash của trie: %x\n", tr.Hash())
+
+	lastBlock, err := GetLastBlock()
+	if err != nil {
+		fmt.Printf("Lỗi khi lấy LAST_BLOCK: %v\n", err)
+	} else {
+		fmt.Printf("LAST_BLOCK: %+v\n", lastBlock)
+	}
+
+	currentBlock, err := GetCurrentBlock()
+	if err != nil {
+		fmt.Printf("Lỗi khi lấy CURRENT_BLOCK: %v\n", err)
+	} else {
+		fmt.Printf("CURRENT_BLOCK: %+v\n", currentBlock)
+	}
 }
