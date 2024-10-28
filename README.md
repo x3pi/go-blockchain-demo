@@ -22,6 +22,7 @@ func CreateNewTrie(db *triedb.Database) (*trie.Trie, error) {
 
 Sử dụng LevelDB làm cơ sở dữ liệu key-value để:
 
+- Lưu trữ các block có thể truy vấn qua trie của go-ethereum
 - Lưu trữ root hash của Trie
 - Lưu trữ thông tin về block hiện tại và block cuối cùng
 
