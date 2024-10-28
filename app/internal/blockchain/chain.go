@@ -102,34 +102,11 @@ func (bc *Blockchain) Init() error {
 			fmt.Printf("Lỗi khi lưu block: %v\n", err)
 			return nil
 		}
-
-		root, nodes := bc.tr.Commit(false)
-		if err := trieDB.Update(root, common.Hash{}, 0, trienode.NewWithNodeSet(nodes), nil); err != nil {
-			fmt.Printf("Lỗi khi cập nhật trie database: %v\n", err)
-			return nil
-		}
-
-		if err := trieDB.Commit(root, false); err != nil {
-			fmt.Printf("Lỗi khi commit trie database: %v\n", err)
-			return nil
-		}
-
-		if err := bc.db.Put(rootKey, root[:]); err != nil {
-			fmt.Printf("Lỗi khi lưu root hash: %v\n", err)
-			return nil
-		}
-		fmt.Printf("Đã lưu trie mới vào cơ sở dữ liệu, root hash: %x\n", root)
-
-		bc.tr, err = CreateNewTrie(trieDB)
-		if err != nil {
-			fmt.Printf("Lỗi khi tạo trie mới sau khi commit: %v\n", err)
-			return nil
-		}
 	} else if err != nil {
 		fmt.Printf("Lỗi khi lấy root hash từ database: %v\n", err)
 		return nil
 	} else {
-		bc.tr, err = RestoreTrieFromRootHash(rootHash, trieDB) // Khôi phục tr ở đây
+		bc.tr, err = bc.RestoreTrieFromRootHash(common.BytesToHash(rootHash))
 		if err != nil {
 			fmt.Printf("Lỗi khi khôi phục trie: %v\n", err)
 			return nil
@@ -284,6 +261,15 @@ func SaveBlockToTrie(block Block, index int, bc *Blockchain) error {
 		return fmt.Errorf("lỗi khi commit trie database: %v", err)
 	}
 
+	// Sử dụng RestoreTrieFromRootHash để khôi phục trie
+
+	newTrie, err := bc.RestoreTrieFromRootHash(root)
+	if err != nil {
+		return fmt.Errorf("lỗi khi khôi phục trie từ root hash: %v", err)
+	}
+	bc.tr = newTrie
+	fmt.Printf("Khôi phục trie từ root hash thành công: %s\n", root)
+
 	if err := bc.db.Put([]byte(ROOT_HASH), root[:]); err != nil {
 		return fmt.Errorf("lỗi khi lưu root hash: %v", err)
 	}
@@ -332,8 +318,9 @@ func SaveBlockToTrie(block Block, index int, bc *Blockchain) error {
 }
 
 // Khôi phục trie từ root hash
-func RestoreTrieFromRootHash(rootHash []byte, trieDB *triedb.Database) (*trie.Trie, error) {
-	return trie.New(trie.TrieID(common.BytesToHash(rootHash)), trieDB)
+func (bc *Blockchain) RestoreTrieFromRootHash(rootHash common.Hash) (*trie.Trie, error) {
+	trieDB := triedb.NewDatabase(rawdb.NewDatabase(bc.db), &triedb.Config{})
+	return trie.New(trie.TrieID(rootHash), trieDB)
 }
 
 // Truy xuất block từ trie
@@ -526,7 +513,7 @@ func (bc *Blockchain) HandleNewBlock(newBlock Block) error {
 	// Thêm kiểm tra xem newBlock.Index đã tồn tại chưa
 	existingBlock, _ := bc.GetBlockFromTrie([]byte(fmt.Sprintf("block_%d", newBlock.Index)))
 	if existingBlock.BlockHeader.Signature != "" {
-		return fmt.Errorf("Block đã tồn tại: chỉ số = %d", newBlock.Index) // Thêm thông báo lỗi nếu block đã tồn tại
+		return fmt.Errorf("Block đã tồn tại: chỉ số = %d, signature = %s", newBlock.Index, existingBlock.BlockHeader.Signature) // Thêm thông báo lỗi nếu block đã tồn tại
 	}
 
 	node, err := bc.GetNodeConfigByIndex(int(newBlock.Index % 3))
