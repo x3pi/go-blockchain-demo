@@ -314,4 +314,4 @@ Các node sẽ tự động kết nối với nhau thông qua cấu hình trong 
 ### 6. Lưu ý
 - Đảm bảo các port 30303, 30304, 30305 không bị sử dụng bởi ứng dụng khác
 - Kiểm tra logs để xem trạng thái kết nối giữa các node
-- Có thể scale số lượng node bằng cách thêm service trong docker-compose.yml
+- Chưa có cơ chế để tăng hoặc giảm node
