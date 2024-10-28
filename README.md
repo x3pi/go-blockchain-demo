@@ -44,7 +44,7 @@ Sử dụng thư viện p2p của go-ethereum để xây dựng mạng ngang hà
 
 - Mỗi node có private key và public key riêng
 - Các node kết nối với nhau thông qua enode URL
-- Giao thức trao đổi block giữa các node
+- Giao thức trao đổi block giữa các node qua đề xuất block và yêu cầu block
 - Đồng bộ hóa trạng thái blockchain
 
 Cấu trúc P2P Network:
@@ -176,7 +176,7 @@ Ví dụ cấu hình node:
 # Chú ý
 - Chỉ sử dụng để demo và học tập
 - Không đảm bảo toàn vẹn dữ liệu của block vì chỉ chỉ key lưu trữ đánh dấu theo index và không băm dữ liệu.
-- Không có ràng buộc nào 2/3 node cùng chạy nên 1 node vẫn chạy được. Các node được đề xuất block tuần tự
+- Không có ràng buộc nào 2/3 node cùng chạy nên 1 node vẫn chạy được. Các node được đề xuất block tuần tự theo file config.
 - Chưa xử lý node offline có quyền đề xuất lại khối chưa đề xuất.
 - Chứa xử lý trường hợp nếu 1 node cố tình gửi block giả mạo.
 - Rất nhiều vấn đề nữa nhưng demo mục đích sử dụng công cụ cơ bản để có thể tạo nên một blockchain và làm quen với các module của go-ethereum.
