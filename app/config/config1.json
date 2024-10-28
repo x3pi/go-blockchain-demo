@@ -1,7 +1,16 @@
 {
 	"privateKeyHex": "fdf0edfd86751d13e9ecbbf0c3a1b197cbccfa1ad5758aaeb22a54dc967fda9f",
+	"index": 1,
 	"nodes": [
-		"enode://8f1273da4d7c042caa74c4fe50443831875128a8ff7817c40f1211cdf6e65e63e5ce5139da1983946cb15a054d951559523d7121ae9d0314f5e187cc757b36e2@host.docker.internal:30304",
-		"enode://d53415bd1e6941e971c2eb1f9a4e964dd8cb043a5865f023f004915aef78d462d61072e9448ea334070cc26460c471a6c6ca9bc82461c02ddea5ca2bf7c170f6@host.docker.internal:30305"
+		{
+			"publicKey": "8f1273da4d7c042caa74c4fe50443831875128a8ff7817c40f1211cdf6e65e63e5ce5139da1983946cb15a054d951559523d7121ae9d0314f5e187cc757b36e2",
+			"url": "host.docker.internal:30304",
+			"index": 2
+		},
+		{
+			"publicKey": "d53415bd1e6941e971c2eb1f9a4e964dd8cb043a5865f023f004915aef78d462d61072e9448ea334070cc26460c471a6c6ca9bc82461c02ddea5ca2bf7c170f6",
+			"url": "host.docker.internal:30305",
+			"index": 3
+		}
 	]
 }

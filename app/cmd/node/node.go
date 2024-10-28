@@ -1,47 +1,35 @@
 package main
 
 import (
-	"encoding/json"
 	"log"
 	"main/internal/blockchain"
 	"main/internal/p2pnetwork"
-	"os"
 )
 
-// Định nghĩa cấu trúc cho file cấu hình
-type Config struct {
-	Nodes         []string `json:"nodes"`
-	PrivateKeyHex string   `json:"privateKeyHex"`
-}
+// Định nghĩa cấu trúc cho node
 
 func main() {
 	// Khởi tạo blockchain
 	bc := blockchain.GetInstance()
+	// Lưu toàn bộ cấu hình vào blockchain
 	if err := bc.Init(); err != nil {
 		log.Fatalf("Không thể khởi tạo blockchain: %v", err)
 	}
-	// Lấy khối genesis
-	lastBlock, err := bc.GetLastBlock()
-	if err != nil {
-		log.Fatalf("Không thể lấy khối genesis: %v", err)
-	}
-	log.Printf("Khối Genesis: %+v\n", lastBlock)
 
-	// Đọc file cấu hình
-	configFile, err := os.ReadFile("config.json")
-	if err != nil {
-		log.Fatalf("Không thể đọc file cấu hình: %v", err)
-	}
+	// Truy cập cấu hình từ blockchain
+	privateKeyHex := bc.Config.PrivateKeyHex // Truy cập trường PrivateKeyHex từ config
 
-	var config Config
-	if err := json.Unmarshal(configFile, &config); err != nil {
-		log.Fatalf("Không thể phân tích file cấu hình: %v", err)
+	// Tạo mảng nodes cho P2P network
+	var enodeNodes []string
+	for _, node := range bc.Config.Nodes { // Sử dụng bc.Config.Nodes
+		enodeNode := "enode://" + node.PublicKey + "@" + node.URL
+		enodeNodes = append(enodeNodes, enodeNode)
 	}
 
 	// Tạo cấu hình cho P2P network
 	p2pConfig := &p2pnetwork.Config{
-		PrivateKeyHex: config.PrivateKeyHex,
-		Nodes:         config.Nodes,
+		PrivateKeyHex: privateKeyHex,
+		Nodes:         enodeNodes, // Sử dụng mảng nodes đã chuyển đổi
 		MaxPeers:      10,
 		Name:          "MyP2PNode",
 		ListenAddr:    ":30303",
