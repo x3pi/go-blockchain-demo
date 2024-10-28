@@ -74,10 +74,9 @@ func (bc *Blockchain) Init() error {
 		// Tạo genesis block
 		block := Block{
 			BlockHeader: BlockHeader{
-				Version:             uint64(1),
-				PreviousBlockHeader: fmt.Sprintf("prev_hash_%d", 0),
-				MerkleRoot:          fmt.Sprintf("merkle_root_%d", 0),
-				Time:                uint64(1630000000 + uint64(0)*600),
+				Version:    uint64(1),
+				MerkleRoot: fmt.Sprintf("block_%d", 0),
+				Time:       uint64(time.Now().Unix()),
 			},
 			Index: uint64(0),
 			Txns:  []string{fmt.Sprintf("tx_%d_1", 0), fmt.Sprintf("tx_%d_2", 0)},
