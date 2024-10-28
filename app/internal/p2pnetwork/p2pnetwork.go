@@ -17,7 +17,7 @@ type P2PNetwork struct {
 	Config     *Config
 	Server     *p2p.Server
 	PrivateKey *ecdsa.PrivateKey
-	blockchain *blockchain.Blockchain // Thêm trường này
+	blockchain *blockchain.Blockchain
 }
 
 type Config struct {
