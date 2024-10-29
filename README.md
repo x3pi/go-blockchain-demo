@@ -1,4 +1,14 @@
 
+# BLS Demo
+
+Trong thư mục `bls-demo` có các ví dụ sử dụng về chữ ký BLS:
+
+- Chữ ký đơn: Cho phép một node ký và xác thực thông điệp
+- Chữ ký đa người ký: Cho phép nhiều node cùng ký một thông điệp
+- Chữ ký ngưỡng: Yêu cầu số lượng tối thiểu chữ ký để xác thực
+
+[Xem thêm tài liệu chi tiết về BLS](https://github.com/x3pi/go-blockchain-demo/blob/main/docs/bls-demo.md)
+
 
 # Blockchain P2P
 
