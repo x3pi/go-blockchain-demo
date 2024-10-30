@@ -2,11 +2,10 @@ package main
 
 import (
 	"log"
+	"main/internal/api"
 	"main/internal/blockchain"
 	"main/internal/p2pnetwork"
 )
-
-// Định nghĩa cấu trúc cho node
 
 func main() {
 	// Khởi tạo blockchain
@@ -15,6 +14,14 @@ func main() {
 	if err := bc.Init(); err != nil {
 		log.Fatalf("Không thể khởi tạo blockchain: %v", err)
 	}
+
+	// Initialize and start HTTP API server in a goroutine
+	apiServer := api.NewServer()
+	go func() {
+		if err := apiServer.Start(":8080"); err != nil {
+			log.Fatalf("Không thể khởi động API server: %v", err)
+		}
+	}()
 
 	// Truy cập cấu hình từ blockchain
 	privateKeyHex := bc.Config.PrivateKeyHex // Truy cập trường PrivateKeyHex từ config

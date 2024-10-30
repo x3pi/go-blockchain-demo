@@ -23,15 +23,19 @@ import (
 // Định nghĩa các hằng số cho khóa cơ sở dữ liệu
 const (
 	ROOT_HASH     = "ROOT_HASH"
+	TX_ROOT_HASH  = "TX_ROOT_HASH"
+	ACC_ROOT_HASH = "ACC_ROOT_HASH"
 	CURRENT_BLOCK = "CURRENT_BLOCK"
 	LAST_BLOCK    = "LAST_BLOCK"
 )
 
 type Blockchain struct {
-	db     *leveldb.Database
-	tr     *trie.Trie
-	mut    sync.RWMutex // để thread-safe
-	Config Config       // Thay đổi từ config thành Config để có thể truy cập từ bên ngoài
+	db      *leveldb.Database
+	tr      *trie.Trie
+	txTrie  *trie.Trie
+	accTrie *trie.Trie
+	mut     sync.RWMutex // để thread-safe
+	Config  Config       // Thay đổi từ config thành Config để có thể truy cập từ bên ngoài
 }
 
 type Node struct {
@@ -112,6 +116,36 @@ func (bc *Blockchain) Init() error {
 			return nil
 		}
 		fmt.Println("Đã khôi phục trie từ cơ sở dữ liệu")
+	}
+
+	// Khởi tạo transaction trie
+	txRootHash, err := bc.db.Get([]byte(TX_ROOT_HASH))
+	if err == errors.ErrNotFound {
+		bc.txTrie, err = CreateNewTrie(trieDB)
+		if err != nil {
+			return fmt.Errorf("lỗi khi tạo transaction trie: %v", err)
+		}
+	} else if err != nil {
+		return err
+	} else {
+		bc.txTrie, err = bc.RestoreTrieFromRootHash(common.BytesToHash(txRootHash))
+		if err != nil {
+			return fmt.Errorf("lỗi khi khôi phục account trie: %v", err)
+		}
+	}
+
+	// Khởi tạo account trie
+	accRootHash, err := bc.db.Get([]byte(ACC_ROOT_HASH))
+	if err == errors.ErrNotFound {
+		bc.accTrie, err = CreateNewTrie(trieDB)
+		if err != nil {
+			return fmt.Errorf("lỗi khi tạo account trie: %v", err)
+		}
+	} else {
+		bc.accTrie, err = bc.RestoreTrieFromRootHash(common.BytesToHash(accRootHash))
+		if err != nil {
+			return fmt.Errorf("lỗi khi khôi phục account trie: %v", err)
+		}
 	}
 
 	key := []byte("block_0")

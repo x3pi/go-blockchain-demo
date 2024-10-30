@@ -5,6 +5,8 @@ type BlockHeader struct {
 	Version             uint64 // Phiên bản
 	PreviousBlockHeader string // băm tiêu đề khối trước
 	MerkleRoot          string // băm gốc merkle
+	RootAccount         string // băm gốc của cây tài khoản
+	RootTransaction     string // băm gốc của cây giao dịch
 	Time                uint64 // thời gian epoch Unix
 	Signature           string // chữ ký của người đề xuất khối
 }
