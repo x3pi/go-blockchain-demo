@@ -5,20 +5,23 @@ services:
   node1:
     build: .
     volumes:
-      - ./config/config1.json:/app/config.json  # Gắn file config.json vào container
+      - ./config/config1.json:/app/config.json
     ports:
-      - "30303:30303"  # Mở cổng 30303
+      - "30303:30303"  # P2P port
+      - "8080:8080"    # API port
 
-  node2:  # Node mới
+  node2:
     build: .
     volumes:
-      - ./config/config2.json:/app/config.json  # Gắn file config.json vào container
+      - ./config/config2.json:/app/config.json
     ports:
-      - "30304:30303"  # Mở cổng 30304
+      - "30304:30303"  # P2P port
+      - "8081:8080"    # API port
 
-  node3:  # Node mới
+  node3:
     build: .
     volumes:
-      - ./config/config3.json:/app/config.json  # Gắn file config.json vào container
+      - ./config/config3.json:/app/config.json
     ports:
-      - "30305:30303"  # Mở cổng 30305
+      - "30305:30303"  # P2P port
+      - "8082:8080"    # API port
