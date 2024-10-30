@@ -183,6 +183,11 @@ func (bc *Blockchain) Init() error {
 		return fmt.Errorf("không thể phân tích file cấu hình: %v", err)
 	}
 	bc.Config = config // Gán giá trị cho bc.config
+
+	if err := bc.InitializeTestAccounts(); err != nil {
+		return fmt.Errorf("lỗi khởi tạo test accounts: %v", err)
+	}
+
 	return nil
 }
 

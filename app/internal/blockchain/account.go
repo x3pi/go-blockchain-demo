@@ -77,21 +77,27 @@ func (bc *Blockchain) SaveAccountToTrie(account *Account) error {
 
 	root, nodes := bc.accTrie.Commit(false)
 	trieDB := triedb.NewDatabase(rawdb.NewDatabase(bc.db), &triedb.Config{})
+
+	// Lưu các node vào database
 	if err := trieDB.Update(root, common.Hash{}, 0, trienode.NewWithNodeSet(nodes), nil); err != nil {
 		return fmt.Errorf("lỗi khi cập nhật account trie: %v", err)
+	}
+
+	// Commit để đảm bảo tất cả các node được lưu
+	if err := trieDB.Commit(root, false); err != nil {
+		return fmt.Errorf("lỗi khi commit trie database: %v", err)
 	}
 
 	if err := bc.db.Put([]byte(ACC_ROOT_HASH), root[:]); err != nil {
 		return fmt.Errorf("lỗi khi lưu account root hash: %v", err)
 	}
 
-	// Thêm bước khôi phục trie từ root hash mới
+	// Khôi phục lại trie để có thể tiếp tục đọc
 	newTrie, err := bc.RestoreTrieFromRootHash(root)
 	if err != nil {
 		return fmt.Errorf("lỗi khi khôi phục trie từ root hash: %v", err)
 	}
 	bc.accTrie = newTrie
-	fmt.Printf("Khôi phục account trie từ root hash thành công: %s\n", root)
 
 	return nil
 }
@@ -111,4 +117,50 @@ func (bc *Blockchain) GetAccountFromTrie(address string) (*Account, error) {
 		return nil, fmt.Errorf("lỗi khi giải mã account: %v", err)
 	}
 	return &account, nil
+}
+
+// InitializeTestAccounts khởi tạo và lưu hai account test vào trie
+func (bc *Blockchain) InitializeTestAccounts() error {
+	// Thêm "0x" prefix nếu chưa có
+	pubKey1 := "0x048f1273da4d7c042caa74c4fe50443831875128a8ff7817c40f1211cdf6e65e63e5ce5139da1983946cb15a054d951559523d7121ae9d0314f5e187cc757b36e2"
+	pubKey2 := "0x04127bae1dc0022eabf3fc16447d501fa45906d5127d116de654b6e93b0606ee9430552b8f458d905459396d581b9201b7745edf1d2f47a84aed5e063cc196942b"
+
+	// Khởi tạo account thứ nhất
+	acc1, err := NewAccountFromPublicKey(pubKey1)
+	if err != nil {
+		return fmt.Errorf("lỗi khởi tạo account 1: %v", err)
+	}
+	// tạo ra tài khoản 0xf780fbF9ff9952897425f302b362eDBb80447108
+
+	// Kiểm tra account 1 đã tồn tại chưa
+	existingAcc1, err := bc.GetAccountFromTrie(acc1.Address)
+	if err == nil && existingAcc1 != nil {
+		fmt.Printf("Account 1 đã tồn tại: %s\n", acc1.Address)
+	} else {
+		// Lưu account 1 vào trie nếu chưa tồn tại
+		if err := bc.SaveAccountToTrie(acc1); err != nil {
+			return fmt.Errorf("lỗi lưu account 1: %v", err)
+		}
+		fmt.Printf("Đã tạo mới account 1: %s\n", acc1.Address)
+	}
+
+	// Khởi tạo account thứ hai
+	acc2, err := NewAccountFromPublicKey(pubKey2)
+	if err != nil {
+		return fmt.Errorf("lỗi khởi tạo account 2: %v", err)
+	}
+
+	// Kiểm tra account 2 đã tồn tại chưa
+	existingAcc2, err := bc.GetAccountFromTrie(acc2.Address)
+	if err == nil && existingAcc2 != nil {
+		fmt.Printf("Account 2 đã tồn tại: %s\n", acc2.Address)
+	} else {
+		// Lưu account 2 vào trie nếu chưa tồn tại
+		if err := bc.SaveAccountToTrie(acc2); err != nil {
+			return fmt.Errorf("lỗi lưu account 2: %v", err)
+		}
+		fmt.Printf("Đã tạo mới account 2: %s\n", acc2.Address)
+	}
+
+	return nil
 }
