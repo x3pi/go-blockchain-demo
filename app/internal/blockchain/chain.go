@@ -36,6 +36,7 @@ type Blockchain struct {
 	accTrie *trie.Trie
 	mut     sync.RWMutex // để thread-safe
 	Config  Config       // Thay đổi từ config thành Config để có thể truy cập từ bên ngoài
+	mempool *Mempool
 }
 
 type Node struct {
@@ -187,6 +188,8 @@ func (bc *Blockchain) Init() error {
 	if err := bc.InitializeTestAccounts(); err != nil {
 		return fmt.Errorf("lỗi khởi tạo test accounts: %v", err)
 	}
+
+	bc.mempool = NewMempool()
 
 	return nil
 }
