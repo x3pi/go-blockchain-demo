@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"main/internal/blockchain"
@@ -14,10 +15,12 @@ import (
 )
 
 type P2PNetwork struct {
-	Config     *Config
-	Server     *p2p.Server
-	PrivateKey *ecdsa.PrivateKey
-	blockchain *blockchain.Blockchain
+	Config         *Config
+	Server         *p2p.Server
+	PrivateKey     *ecdsa.PrivateKey
+	blockchain     *blockchain.Blockchain
+	txChannels     map[string]chan *blockchain.Transaction
+	txChannelMutex sync.RWMutex
 }
 
 type Config struct {
@@ -35,9 +38,11 @@ func NewP2PNetwork(config *Config) (*P2PNetwork, error) {
 	}
 
 	return &P2PNetwork{
-		Config:     config,
-		PrivateKey: nodekey,
-		blockchain: blockchain.GetInstance(),
+		Config:         config,
+		PrivateKey:     nodekey,
+		blockchain:     blockchain.GetInstance(),
+		txChannels:     make(map[string]chan *blockchain.Transaction),
+		txChannelMutex: sync.RWMutex{},
 	}, nil
 }
 
@@ -64,7 +69,7 @@ func (p *P2PNetwork) Start() error {
 	blockProto := p2p.Protocol{
 		Name:    "block",
 		Version: 1,
-		Length:  6,
+		Length:  7,
 		Run:     p.runBlockProtocol,
 	}
 
@@ -112,8 +117,23 @@ func (p *P2PNetwork) Stop() {
 // }
 
 func (p *P2PNetwork) runBlockProtocol(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
+	// Thêm channel để xử lý transaction từ bên ngoài
+	txChan := make(chan *blockchain.Transaction, 100)
+	// Đăng ký channel với peer
+	p.registerTransactionChannel(peer.ID().String(), txChan)
+	defer p.unregisterTransactionChannel(peer.ID().String())
+
 	// Xử lý tin nhắn đến trong một goroutine riêng
 	go p.handleIncomingBlockMessages(peer, rw)
+
+	// Thêm goroutine mới để xử lý transaction
+	go func() {
+		for tx := range txChan {
+			if err := p2p.Send(rw, TransactionMsg, tx); err != nil {
+				log.Printf("Lỗi khi gửi transaction tới peer %v: %v", peer.ID(), err)
+			}
+		}
+	}()
 
 	// Chạy hai goroutine riêng biệt cho hai chức năng định kỳ
 	errChan := make(chan error, 2)
@@ -264,6 +284,40 @@ func (p *P2PNetwork) handleIncomingBlockMessages(peer *p2p.Peer, rw p2p.MsgReadW
 			}
 			// Xử lý last block
 			p.handleLastBlockResponse(peer, block)
+
+		case TransactionMsg:
+			var tx blockchain.Transaction
+			if err := msg.Decode(&tx); err != nil {
+				log.Printf("Lỗi khi giải mã giao dịch: %v\n", err)
+				continue
+			}
+
+			// Get sender's account and verify signature
+			fromAccount, err := p.blockchain.GetAccountFromTrie(tx.From)
+			if err != nil {
+				log.Printf("Lỗi khi lấy thông tin tài khoản người gửi: %v\n", err)
+				continue
+			}
+
+			isValid, err := blockchain.VerifyTransactionSignature(&tx, fromAccount.PublicKey)
+			if err != nil {
+				log.Printf("Lỗi khi xác thực chữ ký giao dịch: %v\n", err)
+				continue
+			}
+
+			if !isValid {
+				log.Printf("Chữ ký giao dịch không hợp lệ\n")
+				continue
+			}
+
+			// Add to mempool
+			if err := p.blockchain.Mempool.AddTransaction(&tx); err != nil {
+				log.Printf("Lỗi khi thêm giao dịch vào mempool: %v\n", err)
+				continue
+			}
+
+			p.blockchain.Mempool.PrintMempool()
+			log.Printf("Đã thêm giao dịch %x vào mempool\n", tx.ID)
 		}
 
 	}
@@ -283,6 +337,7 @@ const (
 	LastBlockResponseMsg
 	BlockProposalRequestMsg
 	BlockProposalResponseMsg
+	TransactionMsg
 )
 
 // Thêm các hàm xử lý mới
@@ -331,4 +386,36 @@ func (p *P2PNetwork) handleBlockProposalRequestMsg(peer *p2p.Peer, block blockch
 		return
 	}
 
+}
+
+// BroadcastTransaction broadcasts a transaction to all connected peers
+func (p *P2PNetwork) BroadcastTransaction(tx *blockchain.Transaction) error {
+	p.txChannelMutex.RLock()
+	defer p.txChannelMutex.RUnlock()
+
+	for peerID, txChan := range p.txChannels {
+		select {
+		case txChan <- tx:
+			log.Printf("Đã gửi transaction tới peer %s", peerID)
+		default:
+			log.Printf("Channel đầy, bỏ qua gửi transaction tới peer %s", peerID)
+		}
+	}
+	return nil
+}
+
+// Thêm các hàm helper để quản lý transaction channels
+func (p *P2PNetwork) registerTransactionChannel(peerID string, ch chan *blockchain.Transaction) {
+	p.txChannelMutex.Lock()
+	defer p.txChannelMutex.Unlock()
+	p.txChannels[peerID] = ch
+}
+
+func (p *P2PNetwork) unregisterTransactionChannel(peerID string) {
+	p.txChannelMutex.Lock()
+	defer p.txChannelMutex.Unlock()
+	if ch, exists := p.txChannels[peerID]; exists {
+		close(ch)
+		delete(p.txChannels, peerID)
+	}
 }

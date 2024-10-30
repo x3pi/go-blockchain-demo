@@ -48,6 +48,15 @@ func main() {
 		log.Fatalf("Không thể khởi tạo P2P network: %v", err)
 	}
 
+	// Thiết lập P2PNetwork cho blockchain
+	bc.SetP2PNetwork(p2pNet)
+
+	// Kiểm tra P2P network đã được thiết lập
+	if bc.P2PNetwork == nil {
+		log.Fatal("P2P network chưa được thiết lập đúng")
+	}
+	log.Printf("P2P network đã được thiết lập thành công")
+
 	// Khởi động P2P network
 	if err := p2pNet.Start(); err != nil {
 		log.Fatalf("Không thể khởi động P2P network: %v", err)

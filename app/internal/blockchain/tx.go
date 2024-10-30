@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strconv"
 	"sync"
 	"time"
@@ -18,12 +19,12 @@ import (
 )
 
 type Transaction struct {
-	ID        []byte  // Hash của transaction
-	From      string  // Địa chỉ người gửi
-	To        string  // Địa chỉ người nhận
-	Amount    float64 // Số tiền giao dịch
-	Timestamp int64   // Thời gian tạo transaction
-	Signature string  // Chữ ký số của transaction
+	ID        []byte // Hash của transaction
+	From      string // Địa chỉ người gửi
+	To        string // Địa chỉ người nhận
+	Amount    uint64 // Số tiền giao dịch
+	Timestamp uint64 // Thời gian tạo transaction
+	Signature string // Chữ ký số của transaction
 }
 
 // NewTransaction tạo một transaction mới
@@ -31,8 +32,8 @@ func NewTransaction(from string, to string, amount float64, privateKeyHex string
 	tx := &Transaction{
 		From:      from,
 		To:        to,
-		Amount:    amount,
-		Timestamp: time.Now().Unix(),
+		Amount:    uint64(amount),
+		Timestamp: uint64(time.Now().Unix()),
 	}
 	// Tạo ID bằng cách hash các thông tin của transaction
 	tx.ID = tx.Hash()
@@ -53,8 +54,8 @@ func (tx *Transaction) Hash() []byte {
 		[][]byte{
 			[]byte(tx.From),
 			[]byte(tx.To),
-			[]byte(strconv.FormatFloat(tx.Amount, 'f', -1, 64)),
-			[]byte(strconv.FormatInt(tx.Timestamp, 10)),
+			[]byte(strconv.FormatUint(tx.Amount, 10)),
+			[]byte(strconv.FormatUint(tx.Timestamp, 10)),
 		},
 		[]byte{},
 	)
@@ -108,7 +109,12 @@ func VerifyTransactionSignature(tx *Transaction, publicKeyHex string) (bool, err
 		return false, fmt.Errorf("lỗi khi phục hồi khóa công khai: %v", err)
 	}
 
+	// In ra các giá trị để debug
+	fmt.Printf("Public Key (hex):     %x\n", publicKeyBytes)
+	fmt.Printf("Recovered Public Key: %x\n", sigPublicKey)
+
 	// So sánh public key
+
 	matches := bytes.Equal(publicKeyBytes, sigPublicKey)
 	return matches, nil
 }
@@ -160,9 +166,9 @@ func (bc *Blockchain) GetTransactionFromTrie(txID []byte) (*Transaction, error) 
 	return &tx, nil
 }
 
-// Mempool cấu trúc để lưu trữ các giao dịch đang chờ xử lý
+// Mempool cấu trúc để lưu trữ các giao dịch đang chờ x lý
 type Mempool struct {
-	transactions map[string]*Transaction // ánh xạ hash giao dịch tới giao dịch
+	transactions map[string]*Transaction // ánh x hash giao dịch tới giao dịch
 	mutex        sync.RWMutex
 }
 
@@ -239,14 +245,14 @@ func (bc *Blockchain) CreateAndAddTransaction(from, to string, amount float64, p
 		return nil, fmt.Errorf("lỗi khi tạo transaction: %v", err)
 	}
 
-	// Xác thực transaction
-	node, err := bc.GetNodeConfigByIndex(bc.Config.Index)
+	// Lấy account từ trie account
+	fromAccount, err := bc.GetAccountFromTrie(from)
 	if err != nil {
-		return nil, fmt.Errorf("lỗi khi lấy thông tin node: %v", err)
+		return nil, fmt.Errorf("lỗi khi lấy thông tin tài khoản người gửi: %v", err)
 	}
 
-	// Verify signature
-	isValid, err := VerifyTransactionSignature(tx, "0x04"+node.PublicKey)
+	// Verify signature sử dụng public key từ account
+	isValid, err := VerifyTransactionSignature(tx, fromAccount.PublicKey)
 	if err != nil {
 		return nil, fmt.Errorf("lỗi khi xác thực chữ ký: %v", err)
 	}
@@ -255,15 +261,29 @@ func (bc *Blockchain) CreateAndAddTransaction(from, to string, amount float64, p
 	}
 
 	// Thêm vào mempool
-	if err := bc.mempool.AddTransaction(tx); err != nil {
+	if err := bc.Mempool.AddTransaction(tx); err != nil {
 		return nil, fmt.Errorf("lỗi khi thêm vào mempool: %v", err)
 	}
 
-	// Lưu transaction vào trie
-	if err := bc.SaveTransactionToTrie(tx); err != nil {
-		// Nếu lưu vào trie thất bại, xóa khỏi mempool
-		bc.mempool.RemoveTransaction(hexutil.Encode(tx.ID))
-		return nil, fmt.Errorf("lỗi khi lưu transaction vào trie: %v", err)
+	bc.Mempool.PrintMempool()
+
+	// // Lưu transaction vào trie
+	// if err := bc.SaveTransactionToTrie(tx); err != nil {
+	// 	// Nếu lưu vào trie thất bại, xóa khỏi mempool
+	// 	bc.Mempool.RemoveTransaction(hexutil.Encode(tx.ID))
+	// 	return nil, fmt.Errorf("lỗi khi lưu transaction vào trie: %v", err)
+	// }
+
+	// Debug print for P2PNetwork
+	fmt.Printf("P2PNetwork status: %v\n", bc.P2PNetwork != nil)
+
+	if bc.P2PNetwork != nil {
+		if err := bc.P2PNetwork.BroadcastTransaction(tx); err != nil {
+			// Log lỗi nhưng không return vì transaction đã được thêm vào mempool
+			log.Printf("Cảnh báo: Lỗi khi broadcast giao dịch: %v", err)
+		} else {
+			log.Printf("Đã broadcast giao dịch thành công: %x", tx.ID)
+		}
 	}
 
 	return tx, nil
@@ -271,18 +291,18 @@ func (bc *Blockchain) CreateAndAddTransaction(from, to string, amount float64, p
 
 // GetMempoolTransactions trả về tất cả các giao dịch trong mempool
 func (bc *Blockchain) GetMempoolTransactions() []*Transaction {
-	return bc.mempool.GetAllTransactions()
+	return bc.Mempool.GetAllTransactions()
 }
 
 // GetMempoolSize trả về số lượng giao dịch trong mempool
 func (bc *Blockchain) GetMempoolSize() int {
-	return bc.mempool.GetSize()
+	return bc.Mempool.GetSize()
 }
 
 // GetTransactionByID trả về giao dịch theo ID
 func (bc *Blockchain) GetTransactionByID(txID string) (*Transaction, error) {
 	// Thử tìm trong mempool trước
-	tx, err := bc.mempool.GetTransaction(txID)
+	tx, err := bc.Mempool.GetTransaction(txID)
 	if err == nil {
 		return tx, nil
 	}
@@ -294,4 +314,26 @@ func (bc *Blockchain) GetTransactionByID(txID string) (*Transaction, error) {
 	}
 
 	return bc.GetTransactionFromTrie(txIDBytes)
+}
+
+// PrintMempool in ra nội dung của mempool
+func (mp *Mempool) PrintMempool() {
+	mp.mutex.RLock()
+	defer mp.mutex.RUnlock()
+
+	fmt.Println("\n=== Mempool Contents ===")
+	if len(mp.transactions) == 0 {
+		fmt.Println("Mempool is empty")
+		return
+	}
+
+	for txID, tx := range mp.transactions {
+		fmt.Printf("\nTransaction ID: %s\n", txID)
+		fmt.Printf("From: %s\n", tx.From)
+		fmt.Printf("To: %s\n", tx.To)
+		fmt.Printf("Amount: %d\n", tx.Amount)
+		fmt.Printf("Timestamp: %d\n", tx.Timestamp)
+		fmt.Printf("Signature: %s\n", tx.Signature[:64]+"...") // Chỉ hiển thị một phần chữ ký
+		fmt.Println("------------------------")
+	}
 }

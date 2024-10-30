@@ -30,13 +30,14 @@ const (
 )
 
 type Blockchain struct {
-	db      *leveldb.Database
-	tr      *trie.Trie
-	txTrie  *trie.Trie
-	accTrie *trie.Trie
-	mut     sync.RWMutex // để thread-safe
-	Config  Config       // Thay đổi từ config thành Config để có thể truy cập từ bên ngoài
-	mempool *Mempool
+	db         *leveldb.Database
+	tr         *trie.Trie
+	txTrie     *trie.Trie
+	accTrie    *trie.Trie
+	mut        sync.RWMutex // để thread-safe
+	Config     Config       // Thay đổi từ config thành Config để có thể truy cập từ bên ngoài
+	Mempool    *Mempool
+	P2PNetwork P2PNetworkInterface // Thêm interface này
 }
 
 type Node struct {
@@ -189,7 +190,7 @@ func (bc *Blockchain) Init() error {
 		return fmt.Errorf("lỗi khởi tạo test accounts: %v", err)
 	}
 
-	bc.mempool = NewMempool()
+	bc.Mempool = NewMempool()
 
 	return nil
 }
@@ -413,8 +414,8 @@ func (bc *Blockchain) CheckProposalCondition() bool {
 	}
 
 	// Lấy block liền kề bằng GetBlockFromTrie
-	key := []byte(fmt.Sprintf("block_%d", currentBlock.Index-1)) // Tạo key cho block liền kề
-	preBlock, err := bc.GetBlockFromTrie(key)                    // Sử dụng GetBlockFromTrie để lấy block liền kề
+	key := []byte(fmt.Sprintf("block_%d", currentBlock.Index-1)) // To key for the block next to the current block
+	preBlock, err := bc.GetBlockFromTrie(key)                    // Use GetBlockFromTrie to get the block next to the current block
 	if err != nil {
 		fmt.Printf("Lỗi khi lấy block liền kề: %v\n", err)
 		return false
@@ -424,12 +425,12 @@ func (bc *Blockchain) CheckProposalCondition() bool {
 		fmt.Printf("2 block gần nhất không được ký: %v\n", err)
 		return false
 	}
-	// Thêm các điều kiện khác nếu cần
+	// Add any other necessary conditions if needed
 	return true
 }
 
 // ProposeNewBlock đề xuất một khối mới và trả về khối được đề xuất nếu có
-func (bc *Blockchain) ProposeNewBlock() (Block, error) { // Thay đổi kiểu trả về
+func (bc *Blockchain) ProposeNewBlock() (Block, error) { // Change the return type to Block
 	bc.mut.Lock()
 	defer bc.mut.Unlock()
 
@@ -477,7 +478,7 @@ func (bc *Blockchain) ProposeNewBlock() (Block, error) { // Thay đổi kiểu t
 			PreviousBlockHeader: currentBlock.BlockHeader.MerkleRoot,
 			MerkleRoot:          fmt.Sprintf("block_%d", currentBlock.Index+1),
 			Time:                uint64(time.Now().Unix()),
-			Signature:           signature, // Gán chữ ký vào đây
+			Signature:           signature, // Gán ch�� ký vào đây
 		},
 		Index: currentBlock.Index + 1,
 		Txns:  []string{}, // Thêm giao dịch nếu cần
@@ -516,7 +517,7 @@ func SignMerkleRoot(privateKeyHex string, message string) (string, error) {
 
 // VerifySignature xác minh xem chữ ký có hợp lệ không
 func VerifySignature(publicKeyHex string, message string, signatureHex string) (bool, error) {
-	// Giải mã chữ ký từ hex
+	// Giải mã chữ k từ hex
 	signature, err := hexutil.Decode(signatureHex)
 	if err != nil {
 		return false, fmt.Errorf("chữ ký hex không hợp lệ: %v", err)
@@ -558,7 +559,7 @@ func (bc *Blockchain) HandleNewBlock(newBlock Block) error {
 		return fmt.Errorf("Block đã tồn tại: chỉ số = %d, signature = %s", newBlock.Index, existingBlock.BlockHeader.Signature) // Thêm thông báo lỗi nếu block đã tồn tại
 	}
 
-	node, err := bc.GetNodeConfigByIndex(int(newBlock.Index % 3))
+	node, err := bc.GetNodeConfigByIndex(int(newBlock.Index%3) + 1)
 	if err != nil {
 		return fmt.Errorf("lỗi khi lấy node: %v", err)
 	}
@@ -584,4 +585,16 @@ func (bc *Blockchain) GetNodeConfigByIndex(index int) (Node, error) {
 		}
 	}
 	return Node{}, fmt.Errorf("không tìm thấy node với chỉ số: %d", index)
+}
+
+// SetP2PNetwork thiết lập P2PNetwork cho blockchain
+func (bc *Blockchain) SetP2PNetwork(p2p P2PNetworkInterface) {
+	bc.mut.Lock()
+	defer bc.mut.Unlock()
+	bc.P2PNetwork = p2p
+}
+
+// Thêm interface cho P2PNetwork
+type P2PNetworkInterface interface {
+	BroadcastTransaction(tx *Transaction) error
 }
