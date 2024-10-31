@@ -26,6 +26,10 @@ func (s *Server) Start(port string) error {
 	http.HandleFunc("/api/transaction", s.handleTransaction)
 	http.HandleFunc("/api/transaction/", s.handleGetTransaction)
 
+	// New routes for blocks
+	http.HandleFunc("/api/block/last", s.handleGetLastBlock)
+	http.HandleFunc("/api/block/current", s.handleGetCurrentBlock)
+
 	log.Printf("Máy chủ API đang khởi động trên cổng %s", port)
 	return http.ListenAndServe(port, nil)
 }
@@ -186,6 +190,114 @@ func (s *Server) handleGetTransaction(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 	// Write response
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, fmt.Sprintf("Lỗi khi mã hóa response: %v", err), http.StatusInternalServerError)
+		return
+	}
+}
+
+func (s *Server) handleGetLastBlock(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Phương thức không được phép", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Lấy last block từ blockchain
+	block, err := s.blockchain.GetLastBlock()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Lỗi khi lấy last block: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Tạo response structure
+	response := struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Index      uint64   `json:"index"`
+			Version    uint64   `json:"version"`
+			MerkleRoot string   `json:"merkleRoot"`
+			Time       uint64   `json:"time"`
+			Signature  string   `json:"signature"`
+			Txns       []string `json:"transactions"`
+		} `json:"data"`
+	}{
+		Success: true,
+		Data: struct {
+			Index      uint64   `json:"index"`
+			Version    uint64   `json:"version"`
+			MerkleRoot string   `json:"merkleRoot"`
+			Time       uint64   `json:"time"`
+			Signature  string   `json:"signature"`
+			Txns       []string `json:"transactions"`
+		}{
+			Index:      block.Index,
+			Version:    block.BlockHeader.Version,
+			MerkleRoot: block.BlockHeader.MerkleRoot,
+			Time:       block.BlockHeader.Time,
+			Signature:  block.BlockHeader.Signature,
+			Txns:       block.Txns,
+		},
+	}
+
+	// Thiết lập header cho response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	// Ghi response
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, fmt.Sprintf("Lỗi khi mã hóa response: %v", err), http.StatusInternalServerError)
+		return
+	}
+}
+
+func (s *Server) handleGetCurrentBlock(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Phương thức không được phép", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Lấy current block t�� blockchain
+	block, err := s.blockchain.GetCurrentBlock()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Lỗi khi lấy current block: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Tạo response structure
+	response := struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Index      uint64   `json:"index"`
+			Version    uint64   `json:"version"`
+			MerkleRoot string   `json:"merkleRoot"`
+			Time       uint64   `json:"time"`
+			Signature  string   `json:"signature"`
+			Txns       []string `json:"transactions"`
+		} `json:"data"`
+	}{
+		Success: true,
+		Data: struct {
+			Index      uint64   `json:"index"`
+			Version    uint64   `json:"version"`
+			MerkleRoot string   `json:"merkleRoot"`
+			Time       uint64   `json:"time"`
+			Signature  string   `json:"signature"`
+			Txns       []string `json:"transactions"`
+		}{
+			Index:      block.Index,
+			Version:    block.BlockHeader.Version,
+			MerkleRoot: block.BlockHeader.MerkleRoot,
+			Time:       block.BlockHeader.Time,
+			Signature:  block.BlockHeader.Signature,
+			Txns:       block.Txns,
+		},
+	}
+
+	// Thiết lập header cho response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	// Ghi response
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, fmt.Sprintf("Lỗi khi mã hóa response: %v", err), http.StatusInternalServerError)
 		return

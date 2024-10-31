@@ -422,12 +422,12 @@ func (bc *Blockchain) CheckProposalCondition() bool {
 	}
 
 	if currentBlock.Index < lastBlock.Index {
-		fmt.Println("Cần cập nhật đầy đủ trước khi đề xuất", currentBlock.Index, lastBlock.Index)
+		fmt.Printf("Cần cập nhật đầy đủ trước khi đề xuất %v < %v\n", currentBlock.Index, lastBlock.Index)
 		return false
 	}
 
 	if (currentBlock.Index+1-uint64(bc.Config.Index))%3 != 0 {
-		fmt.Println("Không phải block có quyền được đề xuất")
+		fmt.Printf("Không phải block có quyền được đề xuất %v config index %v\n", currentBlock.Index+1, bc.Config.Index)
 		return false
 	}
 
@@ -444,6 +444,7 @@ func (bc *Blockchain) CheckProposalCondition() bool {
 	// 	return false
 	// }
 	// Add any other necessary conditions if needed
+	fmt.Printf("Điều kiện đề xuất khối được thỏa mãn\n +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
 	return true
 }
 
@@ -613,4 +614,5 @@ func (bc *Blockchain) SetP2PNetwork(p2p P2PNetworkInterface) {
 // Thêm interface cho P2PNetwork
 type P2PNetworkInterface interface {
 	BroadcastTransaction(tx *Transaction) error
+	RequestTransaction(txID string) (*Transaction, error)
 }
