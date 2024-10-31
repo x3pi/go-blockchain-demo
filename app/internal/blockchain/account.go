@@ -14,14 +14,14 @@ import (
 
 // Account đại diện cho một tài khoản trong blockchain
 type Account struct {
-	Address   string  // Địa chỉ công khai của tài khoản
-	Balance   float64 // Số dư của tài khoản
-	PublicKey string  // Khóa công khai dạng hex
-	Nonce     uint64  // Số transaction đã thực hiện từ tài khoản này
+	Address   string // Địa chỉ công khai của tài khoản
+	Balance   uint64 // Số dư của tài khoản
+	PublicKey string // Khóa công khai dạng hex
+	Nonce     uint64 // Số transaction đã thực hiện từ tài khoản này
 }
 
 // NewAccount tạo một tài khoản mới từ public key
-func NewAccountFromPublicKey(publicKeyHex string) (*Account, error) {
+func NewAccountFromPublicKey(publicKeyHex string, balance uint64) (*Account, error) {
 	// Giải mã public key từ hex
 	publicKeyBytes, err := hexutil.Decode(publicKeyHex)
 	if err != nil {
@@ -39,19 +39,19 @@ func NewAccountFromPublicKey(publicKeyHex string) (*Account, error) {
 
 	return &Account{
 		Address:   address,
-		Balance:   0,
+		Balance:   balance,
 		PublicKey: publicKeyHex,
 		Nonce:     0,
 	}, nil
 }
 
 // GetBalance trả về số dư hiện tại của tài khoản
-func (a *Account) GetBalance() float64 {
+func (a *Account) GetBalance() uint64 {
 	return a.Balance
 }
 
 // UpdateBalance cập nhật số dư của tài khoản
-func (a *Account) UpdateBalance(amount float64) {
+func (a *Account) UpdateBalance(amount uint64) {
 	a.Balance = amount
 }
 
@@ -99,6 +99,7 @@ func (bc *Blockchain) SaveAccountToTrie(account *Account) error {
 	}
 	bc.accTrie = newTrie
 
+	fmt.Printf("Save account thành công : %+v\n", account)
 	return nil
 }
 
@@ -125,8 +126,8 @@ func (bc *Blockchain) InitializeTestAccounts() error {
 	pubKey1 := "0x048f1273da4d7c042caa74c4fe50443831875128a8ff7817c40f1211cdf6e65e63e5ce5139da1983946cb15a054d951559523d7121ae9d0314f5e187cc757b36e2"
 	pubKey2 := "0x04127bae1dc0022eabf3fc16447d501fa45906d5127d116de654b6e93b0606ee9430552b8f458d905459396d581b9201b7745edf1d2f47a84aed5e063cc196942b"
 
-	// Khởi tạo account thứ nhất
-	acc1, err := NewAccountFromPublicKey(pubKey1)
+	// Khởi tạo account thứ nhất với số dư ban đầu
+	acc1, err := NewAccountFromPublicKey(pubKey1, 1000)
 	if err != nil {
 		return fmt.Errorf("lỗi khởi tạo account 1: %v", err)
 	}
@@ -144,8 +145,8 @@ func (bc *Blockchain) InitializeTestAccounts() error {
 		fmt.Printf("Đã tạo mới account 1: %s\n", acc1.Address)
 	}
 
-	// Khởi tạo account thứ hai
-	acc2, err := NewAccountFromPublicKey(pubKey2)
+	// Khởi tạo account thứ hai với số dư ban đầu
+	acc2, err := NewAccountFromPublicKey(pubKey2, 1000)
 	if err != nil {
 		return fmt.Errorf("lỗi khởi tạo account 2: %v", err)
 	}
@@ -160,6 +161,27 @@ func (bc *Blockchain) InitializeTestAccounts() error {
 			return fmt.Errorf("lỗi lưu account 2: %v", err)
 		}
 		fmt.Printf("Đã tạo mới account 2: %s\n", acc2.Address)
+	}
+
+	return nil
+}
+
+// TransferBalance chuyển tiền giữa các tài khoản
+func (bc *Blockchain) TransferBalance(from *Account, to *Account, amount uint64) error {
+	if from.Balance < amount {
+		return fmt.Errorf("số dư không đủ")
+	}
+
+	from.Balance -= amount
+	to.Balance += amount
+
+	// Lưu các thay đổi
+	if err := bc.SaveAccountToTrie(from); err != nil {
+		return fmt.Errorf("lỗi khi cập nhật tài khoản người gửi: %v", err)
+	}
+
+	if err := bc.SaveAccountToTrie(to); err != nil {
+		return fmt.Errorf("lỗi khi cập nhật tài khoản người nhận: %v", err)
 	}
 
 	return nil

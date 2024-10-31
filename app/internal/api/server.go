@@ -24,6 +24,7 @@ func (s *Server) Start(port string) error {
 	// Đăng ký các routes
 	http.HandleFunc("/api/account/", s.handleGetAccount)
 	http.HandleFunc("/api/transaction", s.handleTransaction)
+	http.HandleFunc("/api/transaction/", s.handleGetTransaction)
 
 	log.Printf("Máy chủ API đang khởi động trên cổng %s", port)
 	return http.ListenAndServe(port, nil)
@@ -49,11 +50,39 @@ func (s *Server) handleGetAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Tạo response structure
+	response := struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Address   string `json:"address"`
+			Balance   uint64 `json:"balance"`
+			PublicKey string `json:"publicKey"`
+			Nonce     uint64 `json:"nonce"`
+		} `json:"data"`
+	}{
+		Success: true,
+		Data: struct {
+			Address   string `json:"address"`
+			Balance   uint64 `json:"balance"`
+			PublicKey string `json:"publicKey"`
+			Nonce     uint64 `json:"nonce"`
+		}{
+			Address:   account.Address,
+			Balance:   account.Balance,
+			PublicKey: account.PublicKey,
+			Nonce:     account.Nonce,
+		},
+	}
+
 	// Thiết lập header cho response
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 
 	// Ghi response
-	json.NewEncoder(w).Encode(account)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, fmt.Sprintf("Lỗi khi mã hóa response: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 func (s *Server) handleTransaction(w http.ResponseWriter, r *http.Request) {
@@ -103,4 +132,62 @@ func (s *Server) handleTransaction(w http.ResponseWriter, r *http.Request) {
 			"timestamp": tx.Timestamp,
 		},
 	})
+}
+
+func (s *Server) handleGetTransaction(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Phương thức không được phép", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get transaction ID from URL path
+	txID := r.URL.Path[len("/api/transaction/"):]
+	if txID == "" {
+		http.Error(w, "Yêu cầu phải có ID giao dịch", http.StatusBadRequest)
+		return
+	}
+
+	// Get transaction from blockchain
+	tx, err := s.blockchain.GetTransactionByID(txID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Lỗi khi lấy giao dịch: %v", err), http.StatusNotFound)
+		return
+	}
+
+	// Create response structure
+	response := struct {
+		Success bool `json:"success"`
+		Data    struct {
+			ID        string `json:"id"`
+			From      string `json:"from"`
+			To        string `json:"to"`
+			Amount    uint64 `json:"amount"`
+			Timestamp uint64 `json:"timestamp"`
+		} `json:"data"`
+	}{
+		Success: true,
+		Data: struct {
+			ID        string `json:"id"`
+			From      string `json:"from"`
+			To        string `json:"to"`
+			Amount    uint64 `json:"amount"`
+			Timestamp uint64 `json:"timestamp"`
+		}{
+			ID:        hexutil.Encode(tx.ID),
+			From:      tx.From,
+			To:        tx.To,
+			Amount:    tx.Amount,
+			Timestamp: tx.Timestamp,
+		},
+	}
+
+	// Set response headers
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	// Write response
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, fmt.Sprintf("Lỗi khi mã hóa response: %v", err), http.StatusInternalServerError)
+		return
+	}
 }

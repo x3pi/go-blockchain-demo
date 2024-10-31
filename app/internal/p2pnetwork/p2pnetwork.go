@@ -142,9 +142,10 @@ func (p *P2PNetwork) runBlockProtocol(peer *p2p.Peer, rw p2p.MsgReadWriter) erro
 	go func() {
 		for {
 			now := time.Now()
-			nextRun := now.Truncate(time.Minute).Add(30 * time.Second)
+			// Tính thời điểm chạy tiếp theo (chia lấy dư để tìm khoảng thời gian đến lần chạy tiếp theo)
+			nextRun := now.Truncate(5 * time.Second).Add(5 * time.Second)
 			if nextRun.Before(now) {
-				nextRun = nextRun.Add(time.Minute)
+				nextRun = nextRun.Add(5 * time.Second)
 			}
 			time.Sleep(nextRun.Sub(now))
 			// Gửi yêu cầu last block
@@ -156,8 +157,12 @@ func (p *P2PNetwork) runBlockProtocol(peer *p2p.Peer, rw p2p.MsgReadWriter) erro
 				return
 			}
 			log.Printf("Đã gửi yêu cầu last block đến %v thành công\n", peer.ID())
+
 			// Gửi yêu cầu đề xuất khối
-			block, err := p.blockchain.ProposeNewBlock() // Gửi yêu cầu đề xuất khối
+			p.blockchain.Mempool.PrintMempool()
+			block, err := p.blockchain.ProposeNewBlock()
+			fmt.Println("Đề xuất khối", block.Index)
+			// Gửi yêu cầu đề xuất khối
 			if err != nil {
 				log.Printf("Lỗi khi đề xuất block: %v\n", err)
 				return
@@ -171,7 +176,7 @@ func (p *P2PNetwork) runBlockProtocol(peer *p2p.Peer, rw p2p.MsgReadWriter) erro
 	// Goroutine 2: Chức năng mới lặp 20 giây
 	go func() {
 		for {
-			time.Sleep(20 * time.Second)
+			time.Sleep(1 * time.Second)
 			currentBlock, err := p.blockchain.GetCurrentBlock() // Updated line
 			if err != nil {
 				errChan <- fmt.Errorf("lỗi khi lấy CURRENT_BLOCK: %v", err) // Updated line
@@ -377,13 +382,12 @@ func (p *P2PNetwork) logBlockInfo(block blockchain.Block) {
 }
 
 func (p *P2PNetwork) handleBlockProposalRequestMsg(peer *p2p.Peer, block blockchain.Block) {
-	log.Printf("Nhận được yêu cầu đề xuất block từ %v:\n", peer.ID())
+	log.Printf("Nhận được yêu cầu đề xuất block từ %v, index: %d\n", peer.ID(), block.Index)
 	p.logBlockInfo(block)
 
 	err := p.blockchain.HandleNewBlock(block)
 	if err != nil {
 		log.Printf("Lỗi khi xử lý block mới: %v\n", err)
-		return
 	}
 
 }
