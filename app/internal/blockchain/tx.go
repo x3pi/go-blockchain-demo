@@ -139,7 +139,6 @@ func (bc *Blockchain) SaveTransactionToTrie(tx *Transaction) error {
 
 	// Log thông tin debug
 	fmt.Printf("Root hash: %x\n", root)
-	fmt.Printf("Size of nodes: %d\n", nodes.Size)
 
 	if err := trieDB.Update(root, common.Hash{}, 0, trienode.NewWithNodeSet(nodes), nil); err != nil {
 		return fmt.Errorf("lỗi khi cập nhật trieDB: %v", err)
@@ -334,13 +333,13 @@ func (bc *Blockchain) GetMempoolSize() int {
 
 // GetTransactionByID trả về giao dịch theo ID
 func (bc *Blockchain) GetTransactionByID(txID string) (*Transaction, error) {
-	// Thử tìm trong mempool trước
+	// Try to find the transaction in the local mempool first
 	tx, err := bc.Mempool.GetTransaction(txID)
 	if err == nil {
 		return tx, nil
 	}
 
-	// Nếu không có trong mempool, tìm trong trie
+	// If not found in mempool, try to get it from the trie
 	txIDBytes, err := hexutil.Decode(txID)
 	if err != nil {
 		return nil, fmt.Errorf("ID giao dịch không hợp lệ: %v", err)
@@ -350,6 +349,30 @@ func (bc *Blockchain) GetTransactionByID(txID string) (*Transaction, error) {
 	if err == nil {
 		return tx, nil
 	}
+
+	// // If not found locally, iterate through the nodes and request the transaction
+	// nodes := bc.Config.Nodes // Assuming you have a Config field in Blockchain that holds the node configurations
+	// for _, node := range nodes {
+	// 	// Check if the node index is different from the current blockchain index
+	// 	if node.Index != bc.Config.Index {
+	// 		apiUrl := fmt.Sprintf("http://%s/api/transaction/%s", node.ApiUrl, txID)
+	// 		resp, err := http.Get(apiUrl)
+	// 		if err != nil {
+	// 			log.Printf("Lỗi khi gọi API từ node %s: %v", node.ApiUrl, err)
+	// 			continue // Try the next node
+	// 		}
+	// 		defer resp.Body.Close()
+
+	// 		if resp.StatusCode == http.StatusOK {
+	// 			var transaction Transaction
+	// 			if err := json.NewDecoder(resp.Body).Decode(&transaction); err != nil {
+	// 				log.Printf("Lỗi khi giải mã transaction từ node %s: %v", node.ApiUrl, err)
+	// 				continue // Try the next node
+	// 			}
+	// 			return &transaction, nil
+	// 		}
+	// 	}
+	// }
 
 	// Nếu không tìm thấy locally, thử qua P2P network
 	if bc.P2PNetwork != nil {
@@ -391,7 +414,7 @@ func (mp *Mempool) PrintMempool() {
 	mp.mutex.RLock()
 	defer mp.mutex.RUnlock()
 
-	fmt.Println("\n=== Mempool Contents ===\n")
+	fmt.Println("=== Mempool Contents ===")
 	if len(mp.transactions) == 0 {
 		fmt.Println("Mempool is empty")
 		return

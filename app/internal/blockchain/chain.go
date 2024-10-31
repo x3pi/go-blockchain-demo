@@ -44,6 +44,7 @@ type Node struct {
 	PublicKey string `json:"publicKey"`
 	URL       string `json:"url"`
 	Index     int    `json:"index"` // Thêm dòng này
+	ApiUrl    string `json:"apiUrl"`
 }
 
 // Định nghĩa cấu trúc cho file cấu hình

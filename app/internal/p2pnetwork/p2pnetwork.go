@@ -205,7 +205,7 @@ func (p *P2PNetwork) runBlockProtocol(peer *p2p.Peer, rw p2p.MsgReadWriter) erro
 			block, err := p.blockchain.ProposeNewBlock()
 			if err != nil {
 				log.Printf("Lỗi khi đề xuất block: %v\n", err)
-				continue
+				continue // Tiếp tục vòng lặp thay vì dừng lại
 			}
 
 			// Thêm kiểm tra block index > 0
@@ -413,7 +413,7 @@ func (p *P2PNetwork) handleBlockResponse(peer *p2p.Peer, block blockchain.Block)
 }
 
 func (p *P2PNetwork) handleLastBlockResponse(peer *p2p.Peer, block blockchain.Block) {
-	log.Printf("Nhận được last block từ %v:\n", peer.ID())
+	log.Printf("Nhận được last block từ %v, index: %d\n", peer.ID(), block.Index)
 	p.logBlockInfo(block)
 	lastBlock, err := p.blockchain.GetLastBlock()
 	if err != nil {

@@ -29,8 +29,10 @@ func main() {
 	// Tạo mảng nodes cho P2P network
 	var enodeNodes []string
 	for _, node := range bc.Config.Nodes { // Sử dụng bc.Config.Nodes
-		enodeNode := "enode://" + node.PublicKey + "@" + node.URL
-		enodeNodes = append(enodeNodes, enodeNode)
+		if node.Index != bc.Config.Index { // Kiểm tra điều kiện khác index
+			enodeNode := "enode://" + node.PublicKey + "@" + node.URL
+			enodeNodes = append(enodeNodes, enodeNode)
+		}
 	}
 
 	// Tạo cấu hình cho P2P network
