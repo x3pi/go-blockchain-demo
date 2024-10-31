@@ -286,7 +286,7 @@ func (p *P2PNetwork) handleIncomingBlockMessages(peer *p2p.Peer, rw p2p.MsgReadW
 			block, err := p.blockchain.GetBlockFromTrie(blockIDBytes)
 			if err != nil {
 				log.Printf("Lỗi khi lấy block từ trie: %v\n", err)
-				return
+				continue
 			}
 			err = p2p.Send(rw, BlockResponseMsg, block)
 			if err != nil {
@@ -408,7 +408,6 @@ func (p *P2PNetwork) handleBlockResponse(peer *p2p.Peer, block blockchain.Block)
 	err := p.blockchain.HandleNewBlock(block)
 	if err != nil {
 		log.Printf("Lỗi khi xử lý block mới: %v\n", err)
-		return
 	}
 }
 
@@ -418,7 +417,6 @@ func (p *P2PNetwork) handleLastBlockResponse(peer *p2p.Peer, block blockchain.Bl
 	lastBlock, err := p.blockchain.GetLastBlock()
 	if err != nil {
 		log.Printf("Lỗi khi lấy last block: %v\n", err)
-		return
 	}
 	if block.Index > lastBlock.Index {
 		p.blockchain.SaveLastBlock(block)
@@ -460,6 +458,13 @@ func (p *P2PNetwork) BroadcastTransaction(tx *blockchain.Transaction) error {
 			log.Printf("Channel đầy, bỏ qua gửi transaction tới peer %s", peerID)
 		}
 	}
+
+	// Thêm xử lý lỗi để không đóng kết nối
+	if len(p.txChannels) == 0 {
+		log.Printf("Không có peer nào để gửi transaction")
+		return fmt.Errorf("không có peer nào để gửi transaction")
+	}
+
 	return nil
 }
 
@@ -483,15 +488,18 @@ func (p *P2PNetwork) unregisterTransactionChannel(peerID string) {
 func (p *P2PNetwork) RequestTransaction(txID string) (*blockchain.Transaction, error) {
 	responseChan := make(chan *blockchain.Transaction)
 	errorChan := make(chan error)
+	var wg sync.WaitGroup // Thêm WaitGroup
 
 	// Sử dụng GetAllPeerRWs để lấy map của tất cả peer RWs
 	peerRWs := p.GetAllPeerRWs()
 
 	// Broadcast request đến tất cả peers
 	for peerID, rw := range peerRWs {
+		wg.Add(1) // Tăng số lượng goroutine
 		go func(peerID string, rw p2p.MsgReadWriter) {
+			defer wg.Done() // Giảm số lượng goroutine khi hoàn thành
 			// Gửi yêu cầu transaction
-			fmt.Printf("Gửi yêu cầu transaction tới peer %s\n xxxxxxxxxxxxxxxxxxxxxxxxxxxxx", peerID)
+			fmt.Printf("Gửi yêu cầu transaction tới peer %s\n", peerID)
 			if err := p2p.Send(rw, TransactionRequestMsg, txID); err != nil {
 				errorChan <- fmt.Errorf("lỗi khi gửi yêu cầu transaction tới peer %s: %v", peerID, err)
 				return
@@ -514,6 +522,13 @@ func (p *P2PNetwork) RequestTransaction(txID string) (*blockchain.Transaction, e
 			}
 		}(peerID, rw)
 	}
+
+	// Goroutine để đóng các kênh sau khi tất cả goroutine hoàn thành
+	go func() {
+		wg.Wait()           // Chờ tất cả goroutine hoàn thành
+		close(responseChan) // Đóng kênh response
+		close(errorChan)    // Đóng kênh error
+	}()
 
 	// Chờ phản hồi đầu tiên thành công
 	select {

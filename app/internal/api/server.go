@@ -152,7 +152,7 @@ func (s *Server) handleGetTransaction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get transaction from blockchain
-	tx, err := s.blockchain.GetTransactionByID(txID)
+	tx, err := s.blockchain.GetTransactionByIDFromNode(txID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Lỗi khi lấy giao dịch: %v", err), http.StatusNotFound)
 		return

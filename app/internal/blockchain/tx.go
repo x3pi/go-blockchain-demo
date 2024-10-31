@@ -400,10 +400,33 @@ func (bc *Blockchain) GetTransactionByID(txID string) (*Transaction, error) {
 			// }
 			return tx, nil
 		case err := <-errorChan:
-			return nil, fmt.Errorf("lỗi khi lấy transaction từ P2P network: %v", err)
+			log.Printf("Cảnh báo: lỗi khi lấy transaction từ P2P network: %v", err) // Log lỗi nhưng không dừng quá trình
+			return nil, nil                                                         // Trả về nil để không dừng quá trình
 		case <-timeout:
 			return nil, fmt.Errorf("timeout khi chờ phản hồi từ P2P network")
 		}
+	}
+
+	return nil, fmt.Errorf("không tìm thấy giao dịch với ID: %s", txID)
+}
+
+// GetTransactionByIDFromNode trả về giao dịch theo ID
+func (bc *Blockchain) GetTransactionByIDFromNode(txID string) (*Transaction, error) {
+	// Try to find the transaction in the local mempool first
+	tx, err := bc.Mempool.GetTransaction(txID)
+	if err == nil {
+		return tx, nil
+	}
+
+	// If not found in mempool, try to get it from the trie
+	txIDBytes, err := hexutil.Decode(txID)
+	if err != nil {
+		return nil, fmt.Errorf("ID giao dịch không hợp lệ: %v", err)
+	}
+
+	tx, err = bc.GetTransactionFromTrie(txIDBytes)
+	if err == nil {
+		return tx, nil
 	}
 
 	return nil, fmt.Errorf("không tìm thấy giao dịch với ID: %s", txID)
