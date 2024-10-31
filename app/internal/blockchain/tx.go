@@ -395,9 +395,9 @@ func (bc *Blockchain) GetTransactionByID(txID string) (*Transaction, error) {
 		select {
 		case tx := <-responseChan:
 			// Lưu transaction vào local để sử dụng sau này
-			if err := bc.SaveTransactionToTrie(tx); err != nil {
-				log.Printf("Cảnh báo: Không thể lưu transaction từ P2P vào trie: %v", err)
-			}
+			// if err := bc.SaveTransactionToTrie(tx); err != nil {
+			// 	log.Printf("Cảnh báo: Không thể lưu transaction từ P2P vào trie: %v", err)
+			// }
 			return tx, nil
 		case err := <-errorChan:
 			return nil, fmt.Errorf("lỗi khi lấy transaction từ P2P network: %v", err)
@@ -444,12 +444,12 @@ func (bc *Blockchain) ProcessMempoolTransactions() ([]string, error) {
 		// Lấy thông tin tài khoản người gửi và người nhận
 		fromAcc, err := bc.GetAccountFromTrie(tx.From)
 		if err != nil {
-			return successfulTxs, fmt.Errorf("lỗi khi lấy tài khoản người gửi: %v", err)
+			return successfulTxs, fmt.Errorf("lỗi khi lấy tài khoản người gửi: %v: %v", fromAcc, err)
 		}
 
 		toAcc, err := bc.GetAccountFromTrie(tx.To)
 		if err != nil {
-			return successfulTxs, fmt.Errorf("lỗi khi lấy tài khoản người nhận: %v", err)
+			return successfulTxs, fmt.Errorf("lỗi khi lấy tài khoản người nhận: %v: %v", toAcc, err)
 		}
 
 		// Kiểm tra số dư
@@ -504,12 +504,12 @@ func (bc *Blockchain) ProcessTransactionsByIDs(txIDs []string) error {
 		// Lấy thông tin tài khoản người gửi và người nhận
 		fromAcc, err := bc.GetAccountFromTrie(tx.From)
 		if err != nil {
-			return fmt.Errorf("lỗi khi lấy tài khoản người gửi cho giao dịch %s: %v", txID, err)
+			return fmt.Errorf("lỗi khi lấy tài khoản người gửi cho giao dịch %v: %v", fromAcc, err)
 		}
 
 		toAcc, err := bc.GetAccountFromTrie(tx.To)
 		if err != nil {
-			return fmt.Errorf("lỗi khi lấy tài khoản người nhận cho giao dịch %s: %v", txID, err)
+			return fmt.Errorf("lỗi khi lấy tài khoản người nhận cho giao dịch %v: %v", toAcc, err)
 		}
 
 		// Kiểm tra số dư
@@ -539,7 +539,6 @@ func (bc *Blockchain) ProcessTransactionsByIDs(txIDs []string) error {
 		}
 
 		// Xóa giao dịch khỏi mempool nếu có
-		bc.Mempool.RemoveTransaction(txID)
 	}
 
 	return nil
