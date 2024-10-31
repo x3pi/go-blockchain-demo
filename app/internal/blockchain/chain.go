@@ -104,7 +104,7 @@ func (bc *Blockchain) Init() error {
 			Index: uint64(0),
 			Txns:  []string{},
 		}
-		if err := SaveBlockToTrie(block, 0, bc); err != nil {
+		if err := SaveBlockToTrie(block, bc); err != nil {
 			fmt.Printf("Lỗi khi lưu block: %v\n", err)
 			return nil
 		}
@@ -285,8 +285,8 @@ func CreateNewTrie(db *triedb.Database) (*trie.Trie, error) {
 }
 
 // Lưu block vào trie
-func SaveBlockToTrie(block Block, index int, bc *Blockchain) error {
-	if index > 0 {
+func SaveBlockToTrie(block Block, bc *Blockchain) error {
+	if block.Index > 0 {
 		curentBlock, err := bc.GetCurrentBlock()
 		if err != nil {
 			return fmt.Errorf("lỗi khi lấy LAST_BLOCK: %v", err)
@@ -305,27 +305,31 @@ func SaveBlockToTrie(block Block, index int, bc *Blockchain) error {
 		if err := bc.SaveCurrentBlock(block); err != nil {
 			return fmt.Errorf("lỗi khi lưu CURRENT_BLOCK: %v", err)
 		}
-		fmt.Printf("Cập nhật CURRENT_BLOCK %s\n", fmt.Sprintf("block_%d", index))
+		fmt.Printf("Cập nhật CURRENT_BLOCK %s\n", fmt.Sprintf("block_%d", block.Index))
 
 		if block.Index > lastBlock.Index {
 			// Cập nhật LAST_BLOCK
 			if err := bc.SaveLastBlock(block); err != nil {
 				return fmt.Errorf("lỗi khi lưu LAST_BLOCK: %v", err)
 			}
-			fmt.Printf("Cập nhật LAST_BLOCK %s\n", fmt.Sprintf("block_%d", index))
+			fmt.Printf("Cập nhật LAST_BLOCK %s\n", fmt.Sprintf("block_%d", block.Index))
 		}
 	} else {
-		// Cập nhật CURRENT_BLOCK
-		if err := bc.SaveCurrentBlock(block); err != nil {
-			return fmt.Errorf("lỗi khi lưu CURRENT_BLOCK: %v", err)
-		}
-		fmt.Printf("Cập nhật CURRENT_BLOCK %s\n", fmt.Sprintf("block_%d", index))
+		if block.Index == 0 {
+			// Cập nhật CURRENT_BLOCK
+			if err := bc.SaveCurrentBlock(block); err != nil {
+				return fmt.Errorf("lỗi khi lưu CURRENT_BLOCK: %v", err)
+			}
+			fmt.Printf("Cập nhật CURRENT_BLOCK %s\n", fmt.Sprintf("block_%d", block.Index))
 
-		// Cập nhật LAST_BLOCK
-		if err := bc.SaveLastBlock(block); err != nil {
-			return fmt.Errorf("lỗi khi lưu LAST_BLOCK: %v", err)
+			// Cập nhật LAST_BLOCK
+			if err := bc.SaveLastBlock(block); err != nil {
+				return fmt.Errorf("lỗi khi lưu LAST_BLOCK: %v", err)
+			}
+			fmt.Printf("Cập nhật LAST_BLOCK %s\n", fmt.Sprintf("block_%d", block.Index))
+		} else {
+			return fmt.Errorf("block index không hợp lệ: %d", block.Index)
 		}
-		fmt.Printf("Cập nhật LAST_BLOCK %s\n", fmt.Sprintf("block_%d", index))
 	}
 
 	fmt.Printf("Lưu block vào trie-------------------------------------------------------------: %+v\n", block)
@@ -333,9 +337,9 @@ func SaveBlockToTrie(block Block, index int, bc *Blockchain) error {
 	if err != nil {
 		return err
 	}
-	key := []byte(fmt.Sprintf("block_%d", index))
+	key := []byte(fmt.Sprintf("block_%d", block.Index))
 	bc.tr.Update(key, blockJSON)
-	fmt.Printf("Đã lưu %s\n", fmt.Sprintf("block_%d", index))
+	fmt.Printf("Đã lưu %s\n", fmt.Sprintf("block_%d", block.Index))
 
 	root, nodes := bc.tr.Commit(false)
 	trieDB := triedb.NewDatabase(rawdb.NewDatabase(bc.db), &triedb.Config{})
@@ -455,26 +459,7 @@ func (bc *Blockchain) ProposeNewBlock() (Block, error) {
 	}
 
 	if !bc.CheckProposalCondition() {
-		// Nếu là block chưa được ký
-		// if currentBlock.Index > 2 && (currentBlock.Index-uint64(bc.Config.Index))%3 == 0 && currentBlock.BlockHeader.Signature == "" {
-		// 	sg, err := SignMerkleRoot(bc.Config.PrivateKeyHex, fmt.Sprintf("block_%d", currentBlock.Index))
-		// 	if err != nil {
-		// 		return Block{}, fmt.Errorf("lỗi khi tạo chữ ký: %v", err)
-		// 	}
-		// 	block := Block{
-		// 		BlockHeader: BlockHeader{
-		// 			Version:             currentBlock.BlockHeader.Version,
-		// 			MerkleRoot:          fmt.Sprintf("block_%d", currentBlock.Index),
-		// 			PreviousBlockHeader: currentBlock.BlockHeader.PreviousBlockHeader,
-		// 			Time:                uint64(time.Now().Unix()),
-		// 			Signature:           sg,
-		// 		},
-		// 		Index: currentBlock.Index + 1,
-		// 		Txns:  []string{},
-		// 	}
-		// 	return block, nil
-		// }
-		return Block{}, nil
+		return Block{}, fmt.Errorf("không đủ điều kiện để đề xuất block mới")
 	}
 
 	fmt.Printf("Bắt đầu đề xuất khối\n")
@@ -487,7 +472,8 @@ func (bc *Blockchain) ProposeNewBlock() (Block, error) {
 	fmt.Printf("------------------------------processedTxs----------------------------------------\n")
 
 	fmt.Printf("Processed transactions: %+v\n", processedTxs)
-
+	fmt.Printf("------------------------------currentBlock----------------------------------------\n")
+	fmt.Printf("currentBlock: %+v\n", currentBlock)
 	// Tạo chữ ký cho MerkleRoot
 	signature, err := SignMerkleRoot(bc.Config.PrivateKeyHex, fmt.Sprintf("block_%d", currentBlock.Index+1))
 	if err != nil {
@@ -507,7 +493,7 @@ func (bc *Blockchain) ProposeNewBlock() (Block, error) {
 	}
 
 	// Lưu khối mới vào trie
-	if err := SaveBlockToTrie(newBlock, int(newBlock.Index), bc); err != nil {
+	if err := SaveBlockToTrie(newBlock, bc); err != nil {
 		return Block{}, fmt.Errorf("lỗi khi lưu khối mới: %v", err)
 	}
 
@@ -599,7 +585,7 @@ func (bc *Blockchain) HandleNewBlock(newBlock Block) error {
 	}
 
 	// Lưu block mới vào trie
-	if err := SaveBlockToTrie(newBlock, int(newBlock.Index), bc); err != nil {
+	if err := SaveBlockToTrie(newBlock, bc); err != nil {
 		return fmt.Errorf("lỗi khi lưu block mới vào trie: %v", err)
 	}
 

@@ -137,10 +137,10 @@ func (p *P2PNetwork) runBlockProtocol(peer *p2p.Peer, rw p2p.MsgReadWriter) erro
 
 	// Chạy hai goroutine riêng biệt cho hai chức năng định kỳ
 	errChan := make(chan error, 2)
-
-	// Goroutine 1: Chạy khi tới giây thứ 30 của phút
+	// Goroutine 1: Chạy mỗi 5 giây
 	go func() {
 		for {
+			fmt.Println("Goroutine 1: Chạy mỗi 5 giây")
 			now := time.Now()
 			// Tính thời điểm chạy tiếp theo (chia lấy dư để tìm khoảng thời gian đến lần chạy tiếp theo)
 			nextRun := now.Truncate(5 * time.Second).Add(5 * time.Second)
@@ -153,41 +153,48 @@ func (p *P2PNetwork) runBlockProtocol(peer *p2p.Peer, rw p2p.MsgReadWriter) erro
 				Type: "last_block",
 			}
 			if err := p2p.Send(rw, LastBlockRequestMsg, lastBlockRequest); err != nil {
-				errChan <- fmt.Errorf("lỗi khi gửi yêu cầu last block: %v", err)
-				return
+				log.Printf("Lỗi khi gửi yêu cầu last block: %v", err)
+				continue
 			}
 			log.Printf("Đã gửi yêu cầu last block đến %v thành công\n", peer.ID())
 
 			// Gửi yêu cầu đề xuất khối
 			p.blockchain.Mempool.PrintMempool()
 			block, err := p.blockchain.ProposeNewBlock()
-			fmt.Println("Đề xuất khối", block.Index)
-			// Gửi yêu cầu đề xuất khối
 			if err != nil {
 				log.Printf("Lỗi khi đề xuất block: %v\n", err)
-				return
+				continue
 			}
-			if err := p2p.Send(rw, BlockProposalRequestMsg, block); err != nil {
-				log.Printf("Lỗi khi gửi đề xuất block đến %v: %v\n", peer.ID(), err)
+
+			// Thêm kiểm tra block index > 0
+			if block.Index > 0 {
+				fmt.Printf("Đề xuất khối index: %d\n", block.Index)
+				fmt.Printf("Đề xuất khối: %+v\n", block)
+				if err := p2p.Send(rw, BlockProposalRequestMsg, block); err != nil {
+					log.Printf("Lỗi khi gửi đề xuất block đến %v: %v\n", peer.ID(), err)
+				}
 			}
 		}
 	}()
 
-	// Goroutine 2: Chức năng mới lặp 20 giây
+	// Goroutine 2: Chức năng mới lặp 1 giây
 	go func() {
 		for {
+			fmt.Println("Goroutine 2: Chạy mỗi 1 giây")
 			time.Sleep(1 * time.Second)
-			currentBlock, err := p.blockchain.GetCurrentBlock() // Updated line
+
+			currentBlock, err := p.blockchain.GetCurrentBlock()
 			if err != nil {
-				errChan <- fmt.Errorf("lỗi khi lấy CURRENT_BLOCK: %v", err) // Updated line
-				return
+				log.Printf("Lỗi khi lấy CURRENT_BLOCK: %v", err)
+				continue
 			}
 
-			lastBlock, err := p.blockchain.GetLastBlock() // Updated line
+			lastBlock, err := p.blockchain.GetLastBlock()
 			if err != nil {
-				errChan <- fmt.Errorf("lỗi khi lấy LAST_BLOCK: %v", err) // Updated line
-				return
+				log.Printf("Lỗi khi lấy LAST_BLOCK: %v", err)
+				continue
 			}
+
 			// Gửi yêu cầu lấy block
 			if currentBlock.Index < lastBlock.Index {
 				blockID := fmt.Sprintf("block_%d", currentBlock.Index+1)
@@ -196,10 +203,11 @@ func (p *P2PNetwork) runBlockProtocol(peer *p2p.Peer, rw p2p.MsgReadWriter) erro
 					BlockID: blockID,
 				}
 				if err := p2p.Send(rw, BlockRequestMsg, request); err != nil {
-					errChan <- fmt.Errorf("lỗi khi gửi yêu cầu block: %v", err)
-					return
+					log.Printf("Lỗi khi gửi yêu cầu block: %v", err)
+					continue
+				} else {
+					log.Printf("Đã gửi yêu cầu block %s đến %v thành công\n", blockID, peer.ID())
 				}
-				log.Printf("Đã gửi yêu cầu block %s đến %v thành công\n", blockID, peer.ID())
 			}
 		}
 	}()
