@@ -1,6 +1,7 @@
 package p2pnetwork
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"fmt"
 	"log"
@@ -85,8 +86,12 @@ func (p *P2PNetwork) Start() error {
 		return fmt.Errorf("không thể khởi động server: %v", err)
 	}
 
+	log.Printf("Chờ 20 giây trước khi bắt đầu kết nối tới các node khác...")
+	time.Sleep(20 * time.Second)
+
 	for _, node := range nodes {
 		p.Server.AddPeer(node)
+		log.Printf("Đã thêm peer %v vào danh sách kết nối", node.ID())
 	}
 
 	return nil
@@ -121,21 +126,179 @@ func (p *P2PNetwork) Stop() {
 // 	}
 // }
 
+// Hàm xử lý đề xuất block mỗi 5 giây
+func (p *P2PNetwork) handleBlockProposals(peer *p2p.Peer, rw p2p.MsgReadWriter) {
+	reconnectAttempts := 0
+	backoff := time.Second
+
+	for {
+		time.Sleep(5 * time.Second)
+
+		if !p.isPeerConnected(peer.ID()) {
+			if err := p.handleReconnect(peer, &reconnectAttempts, &backoff, &rw); err != nil {
+				continue
+			}
+		}
+
+		// Gửi yêu cầu đề xuất khối
+		p.blockchain.Mempool.PrintMempool()
+		block, err := p.blockchain.ProposeNewBlock()
+		if err != nil {
+			log.Printf("Lỗi khi đề xuất block: %v\n", err)
+			continue
+		}
+
+		if block.Index > 0 {
+			fmt.Printf("Đề xuất khối index: %d\n", block.Index)
+			fmt.Printf("Đề xuất khối: %+v\n", block)
+			if err := p2p.Send(rw, BlockProposalRequestMsg, block); err != nil {
+				log.Printf("Lỗi khi gửi đề xuất block đến %v: %v\n", peer.ID(), err)
+			}
+		}
+	}
+}
+
+// Hàm xử lý yêu cầu block mỗi giây
+func (p *P2PNetwork) handleBlockRequests(peer *p2p.Peer, rw p2p.MsgReadWriter) {
+	reconnectAttempts := 0
+	for {
+		time.Sleep(1 * time.Second)
+
+		if !p.isPeerConnected(peer.ID()) {
+			if err := p.handleReconnect(peer, &reconnectAttempts, nil, &rw); err != nil {
+				continue
+			}
+		}
+
+		currentBlock, err := p.blockchain.GetCurrentBlock()
+		if err != nil {
+			log.Printf("Lỗi khi lấy CURRENT_BLOCK: %v", err)
+			continue
+		}
+
+		lastBlock, err := p.blockchain.GetLastBlock()
+		if err != nil {
+			log.Printf("Lỗi khi lấy LAST_BLOCK: %v", err)
+			continue
+		}
+
+		if currentBlock.Index < lastBlock.Index {
+			blockID := fmt.Sprintf("block_%d", currentBlock.Index+1)
+			request := BlockRequest{
+				Type:    "request",
+				BlockID: blockID,
+			}
+			if err := p2p.Send(rw, BlockRequestMsg, request); err != nil {
+				log.Printf("Lỗi khi gửi yêu cầu block: %v", err)
+			} else {
+				log.Printf("Đã gửi yêu cầu block %s đến %v thành công\n", blockID, peer.ID())
+			}
+		}
+	}
+}
+
+// Hàm xử lý yêu cầu last block mỗi giây
+func (p *P2PNetwork) handleLastBlockRequests(peer *p2p.Peer, rw p2p.MsgReadWriter) {
+	reconnectAttempts := 0
+	backoff := time.Second
+
+	for {
+		time.Sleep(1 * time.Second)
+
+		if !p.isPeerConnected(peer.ID()) {
+			if err := p.handleReconnect(peer, &reconnectAttempts, &backoff, &rw); err != nil {
+				continue
+			}
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		done := make(chan error, 1)
+
+		go func() {
+			lastBlockRequest := BlockRequest{
+				Type: "last_block",
+			}
+			done <- p2p.Send(rw, LastBlockRequestMsg, lastBlockRequest)
+		}()
+
+		select {
+		case err := <-done:
+			if err != nil {
+				if err.Error() == "shutting down" || err.Error() == "use of closed network connection" {
+					log.Printf("Kết nối với peer %v đã đóng, đang thử kết nối lại...", peer.ID())
+					time.Sleep(5 * time.Second)
+				} else {
+					log.Printf("Lỗi khi gửi yêu cầu last block: %v", err)
+				}
+			} else {
+				log.Printf("Đã gửi yêu cầu last block đến %v thành công", peer.ID())
+			}
+		case <-ctx.Done():
+			log.Printf("Timeout khi gửi yêu cầu last block đến %v", peer.ID())
+		}
+		cancel()
+	}
+}
+
+// Hàm helper để xử lý kết nối lại
+func (p *P2PNetwork) handleReconnect(peer *p2p.Peer, attempts *int, backoff *time.Duration, rw *p2p.MsgReadWriter) error {
+	log.Printf("Phát hiện mất kết nối với peer %v", peer.ID())
+
+	if err := p.reconnectToPeer(peer.Node()); err != nil {
+		*attempts++
+		if *attempts >= maxReconnectAttempts {
+			log.Printf("Đã thử kết nối lại %d lần không thành công với peer %v",
+				maxReconnectAttempts, peer.ID())
+			*attempts = 0
+			if backoff != nil {
+				*backoff = time.Second
+			}
+			time.Sleep(30 * time.Second)
+			return fmt.Errorf("đã đạt giới hạn số lần thử kết nối lại")
+		}
+
+		if backoff != nil {
+			*backoff *= 2
+			if *backoff > 30*time.Second {
+				*backoff = 30 * time.Second
+			}
+			log.Printf("Kết nối lại thất bại lần %d với peer %v. Thử lại sau %v",
+				*attempts, peer.ID(), *backoff)
+			time.Sleep(*backoff)
+		} else {
+			log.Printf("Kết nối lại thất bại lần %d với peer %v: %v. Thử lại sau %v",
+				*attempts, peer.ID(), err, reconnectDelay)
+			time.Sleep(reconnectDelay)
+		}
+		return err
+	}
+
+	*attempts = 0
+	if backoff != nil {
+		*backoff = time.Second
+	}
+	log.Printf("Đã kết nối lại thành công với peer %v", peer.ID())
+
+	if newRW := p.getPeerRW(peer.ID().String()); newRW != nil {
+		*rw = newRW
+	}
+	return nil
+}
+
+// Cập nhật hàm runBlockProtocol để sử dụng các hàm mới
 func (p *P2PNetwork) runBlockProtocol(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
-	// Lưu rw cho peer này
+	// Thiết lập ban đầu
 	p.setPeerRW(peer.ID().String(), rw)
 	defer p.removePeerRW(peer.ID().String())
 
-	// Thêm channel để xử lý transaction từ bên ngoài
 	txChan := make(chan *blockchain.Transaction, 100)
-	// Đăng ký channel với peer
 	p.registerTransactionChannel(peer.ID().String(), txChan)
 	defer p.unregisterTransactionChannel(peer.ID().String())
 
-	// Xử lý tin nhắn đến trong một goroutine riêng
+	// Xử lý tin nhắn đến
 	go p.handleIncomingBlockMessages(peer, rw)
 
-	// Thêm goroutine mới để xử lý transaction
+	// Xử lý transaction
 	go func() {
 		for tx := range txChan {
 			if err := p2p.Send(rw, TransactionMsg, tx); err != nil {
@@ -144,128 +307,24 @@ func (p *P2PNetwork) runBlockProtocol(peer *p2p.Peer, rw p2p.MsgReadWriter) erro
 		}
 	}()
 
-	// Chạy hai goroutine riêng biệt cho hai chức năng định kỳ
-	errChan := make(chan error, 2)
-	// Goroutine 1: Chạy mỗi 5 giây
-	go func() {
-		reconnectAttempts := 0
-		for {
-			// Kiểm tra kết nối
-			if !p.isPeerConnected(peer.ID()) {
-				log.Printf("Phát hiện peer %v đã ngắt kết nối", peer.ID())
+	// Khởi chạy 3 goroutine chính
+	go p.handleBlockProposals(peer, rw)
+	go p.handleBlockRequests(peer, rw)
+	go p.handleLastBlockRequests(peer, rw)
 
-				// Thử kết nối lại
-				if err := p.reconnectToPeer(peer.Node()); err != nil {
-					reconnectAttempts++
-					if reconnectAttempts >= maxReconnectAttempts {
-						log.Printf("Đã thử kết nối lại %d lần không thành công với peer %v, tiếp tục vòng lặp",
-							maxReconnectAttempts, peer.ID())
-						reconnectAttempts = 0 // Reset số lần thử
-						continue              // Tiếp tục vòng lặp thay vì return
-					}
-					log.Printf("Kết nối lại thất bại lần %d với peer %v: %v. Thử lại sau %v",
-						reconnectAttempts, peer.ID(), err, reconnectDelay)
-					time.Sleep(reconnectDelay)
-					continue
-				}
-
-				// Kết nối lại thành công
-				reconnectAttempts = 0
-				log.Printf("Đã kết nối lại thành công với peer %v", peer.ID())
-
-				// Khởi tạo lại rw mới cho peer
-				if newRW := p.getPeerRW(peer.ID().String()); newRW != nil {
-					rw = newRW
-				}
-			}
-
-			now := time.Now()
-			nextRun := now.Truncate(5 * time.Second).Add(5 * time.Second)
-			if nextRun.Before(now) {
-				nextRun = nextRun.Add(5 * time.Second)
-			}
-			time.Sleep(nextRun.Sub(now))
-
-			// Gửi yêu cầu last block với xử lý lỗi tốt hơn
-			lastBlockRequest := BlockRequest{
-				Type: "last_block",
-			}
-			if err := p2p.Send(rw, LastBlockRequestMsg, lastBlockRequest); err != nil {
-				if err.Error() == "shutting down" {
-					log.Printf("Kết nối với peer %v đã đóng", peer.ID())
-					continue
-				}
-				log.Printf("Lỗi khi gửi yêu cầu last block: %v", err)
-				continue
-			}
-			log.Printf("Đã gửi yêu cầu last block đến %v thành công\n", peer.ID())
-
-			// Gửi yêu cầu đề xuất khối
-			p.blockchain.Mempool.PrintMempool()
-			block, err := p.blockchain.ProposeNewBlock()
-			if err != nil {
-				log.Printf("Lỗi khi đề xuất block: %v\n", err)
-				continue // Tiếp tục vòng lặp thay vì dừng lại
-			}
-
-			// Thêm kiểm tra block index > 0
-			if block.Index > 0 {
-				fmt.Printf("Đề xuất khối index: %d\n", block.Index)
-				fmt.Printf("Đề xuất khối: %+v\n", block)
-				if err := p2p.Send(rw, BlockProposalRequestMsg, block); err != nil {
-					log.Printf("Lỗi khi gửi đề xuất block đến %v: %v\n", peer.ID(), err)
-				}
-			}
-		}
-	}()
-
-	// Goroutine 2: Chức năng mới lặp 1 giây
-	go func() {
-		for {
-			// fmt.Println("Goroutine 2: Chạy mỗi 1 giây")
-			time.Sleep(1 * time.Second)
-
-			currentBlock, err := p.blockchain.GetCurrentBlock()
-			if err != nil {
-				log.Printf("Lỗi khi lấy CURRENT_BLOCK: %v", err)
-				continue
-			}
-
-			lastBlock, err := p.blockchain.GetLastBlock()
-			if err != nil {
-				log.Printf("Lỗi khi lấy LAST_BLOCK: %v", err)
-				continue
-			}
-
-			// Gửi yêu cầu lấy block
-			if currentBlock.Index < lastBlock.Index {
-				blockID := fmt.Sprintf("block_%d", currentBlock.Index+1)
-				request := BlockRequest{
-					Type:    "request",
-					BlockID: blockID,
-				}
-				if err := p2p.Send(rw, BlockRequestMsg, request); err != nil {
-					log.Printf("Lỗi khi gửi yêu cầu block: %v", err)
-					continue
-				} else {
-					log.Printf("Đã gửi yêu cầu block %s đến %v thành công\n", blockID, peer.ID())
-				}
-			}
-		}
-	}()
-
-	// Đợi và xử lý lỗi từ bất kỳ goroutine nào
-	if err := <-errChan; err != nil {
-		return err
-	}
-
-	return nil
+	// Chờ vô hạn
+	select {}
 }
 
 func (p *P2PNetwork) handleIncomingBlockMessages(peer *p2p.Peer, rw p2p.MsgReadWriter) {
 	for {
 		msg, err := rw.ReadMsg()
 		if err != nil {
+			if err.Error() == "EOF" || err.Error() == "use of closed network connection" {
+				log.Printf("Kết nối với peer %v đã đóng, đang dọn dẹp...", peer.ID())
+				p.cleanupPeerConnection(peer.ID().String())
+				return
+			}
 			log.Printf("Lỗi khi đọc tin nhắn từ %v: %v\n", peer.ID(), err)
 			return
 		}
@@ -373,9 +432,56 @@ func (p *P2PNetwork) handleIncomingBlockMessages(peer *p2p.Peer, rw p2p.MsgReadW
 
 			p.blockchain.Mempool.PrintMempool()
 			log.Printf("Đã thêm giao dịch %x vào mempool\n", tx.ID)
+
+		case TransactionRequestMsg:
+			var txID string
+			if err := msg.Decode(&txID); err != nil {
+				log.Printf("Lỗi khi giải mã yêu cầu transaction: %v\n", err)
+				continue
+			}
+
+			// Tìm transaction sử dụng GetTransactionByIDFromNode
+			tx, err := p.blockchain.GetTransactionByIDFromNode(txID)
+			if err != nil {
+				log.Printf("Không tìm thấy transaction %s: %v\n", txID, err)
+				continue
+			}
+
+			// Gửi transaction về cho peer yêu cầu
+			if err := p2p.Send(rw, TransactionResponseMsg, tx); err != nil {
+				log.Printf("Lỗi khi gửi transaction response: %v\n", err)
+			}
 		}
 
 	}
+}
+
+// Thêm hàm mới để dọn dẹp kết nối peer
+func (p *P2PNetwork) cleanupPeerConnection(peerID string) {
+	// Xóa peer khỏi danh sách peerRWs
+	p.removePeerRW(peerID)
+
+	// Đóng và xóa transaction channel
+	p.txChannelMutex.Lock()
+	if ch, exists := p.txChannels[peerID]; exists {
+		close(ch)
+		delete(p.txChannels, peerID)
+	}
+	p.txChannelMutex.Unlock()
+
+	// Thử kết nối lại sau một khoảng thời gian
+	go func() {
+		time.Sleep(5 * time.Second)
+		// Find peer by ID from peers list
+		for _, peer := range p.Server.Peers() {
+			if peer.ID().String() == peerID {
+				if err := p.reconnectToPeer(peer.Node()); err != nil {
+					log.Printf("Không thể kết nối lại với peer %s: %v", peerID, err)
+				}
+				break
+			}
+		}
+	}()
 }
 
 // Định nghĩa cấu trúc cho tin nhắn yêu cầu
@@ -486,58 +592,104 @@ func (p *P2PNetwork) unregisterTransactionChannel(peerID string) {
 
 // RequestTransaction requests a transaction from peers
 func (p *P2PNetwork) RequestTransaction(txID string) (*blockchain.Transaction, error) {
+	// Kiểm tra các điều kiện đầu vào
+	if txID == "" {
+		return nil, fmt.Errorf("transaction ID không được để trống")
+	}
+
 	responseChan := make(chan *blockchain.Transaction)
 	errorChan := make(chan error)
-	var wg sync.WaitGroup // Thêm WaitGroup
+	var wg sync.WaitGroup
 
-	// Sử dụng GetAllPeerRWs để lấy map của tất cả peer RWs
+	// Lấy danh sách peer RWs
 	peerRWs := p.GetAllPeerRWs()
+	if len(peerRWs) == 0 {
+		return nil, fmt.Errorf("không có peer nào đang kết nối")
+	}
 
 	// Broadcast request đến tất cả peers
 	for peerID, rw := range peerRWs {
-		wg.Add(1) // Tăng số lượng goroutine
+		// Kiểm tra rw không nil
+		if rw == nil {
+			log.Printf("Bỏ qua peer %s do rw là nil", peerID)
+			continue
+		}
+
+		wg.Add(1)
 		go func(peerID string, rw p2p.MsgReadWriter) {
-			defer wg.Done() // Giảm số lượng goroutine khi hoàn thành
-			// Gửi yêu cầu transaction
-			fmt.Printf("Gửi yêu cầu transaction tới peer %s\n", peerID)
-			if err := p2p.Send(rw, TransactionRequestMsg, txID); err != nil {
-				errorChan <- fmt.Errorf("lỗi khi gửi yêu cầu transaction tới peer %s: %v", peerID, err)
-				return
-			}
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					errorChan <- fmt.Errorf("panic khi xử lý peer %s: %v", peerID, r)
+				}
+			}()
 
-			// Đọc phản hồi
-			msg, err := rw.ReadMsg()
-			if err != nil {
-				errorChan <- fmt.Errorf("lỗi khi đọc phản hồi từ peer %s: %v", peerID, err)
-				return
-			}
+			// Gửi yêu cầu transaction với timeout
+			sendCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
 
-			if msg.Code == TransactionResponseMsg {
-				var tx blockchain.Transaction
-				if err := msg.Decode(&tx); err != nil {
-					errorChan <- fmt.Errorf("lỗi khi giải mã transaction từ peer %s: %v", peerID, err)
+			done := make(chan error, 1)
+			go func() {
+				done <- p2p.Send(rw, TransactionRequestMsg, txID)
+			}()
+
+			select {
+			case err := <-done:
+				if err != nil {
+					if err.Error() == "shutting down" {
+						log.Printf("Peer %s đang đóng kết nối", peerID)
+						return
+					}
+					errorChan <- fmt.Errorf("lỗi khi gửi yêu cầu tới peer %s: %v", peerID, err)
 					return
 				}
-				responseChan <- &tx
+			case <-sendCtx.Done():
+				errorChan <- fmt.Errorf("timeout khi gửi yêu cầu tới peer %s", peerID)
+				return
+			}
+
+			// Đọc phản hồi với timeout
+			readCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+
+			msgChan := make(chan p2p.Msg, 1)
+			errChan := make(chan error, 1)
+
+			go func() {
+				msg, err := rw.ReadMsg()
+				if err != nil {
+					errChan <- err
+					return
+				}
+				msgChan <- msg
+			}()
+
+			select {
+			case msg := <-msgChan:
+				if msg.Code == TransactionResponseMsg {
+					var tx blockchain.Transaction
+					if err := msg.Decode(&tx); err != nil {
+						errorChan <- fmt.Errorf("lỗi khi giải mã transaction từ peer %s: %v", peerID, err)
+						return
+					}
+					responseChan <- &tx
+				}
+			case err := <-errChan:
+				errorChan <- fmt.Errorf("lỗi khi đọc phản hồi từ peer %s: %v", peerID, err)
+			case <-readCtx.Done():
+				errorChan <- fmt.Errorf("timeout khi đọc phản hồi từ peer %s", peerID)
 			}
 		}(peerID, rw)
 	}
 
-	// Goroutine để đóng các kênh sau khi tất cả goroutine hoàn thành
-	go func() {
-		wg.Wait()           // Chờ tất cả goroutine hoàn thành
-		close(responseChan) // Đóng kênh response
-		close(errorChan)    // Đóng kênh error
-	}()
-
-	// Chờ phản hồi đầu tiên thành công
+	// Chờ phản hồi với timeout tổng thể
 	select {
 	case tx := <-responseChan:
 		return tx, nil
 	case err := <-errorChan:
 		return nil, err
 	case <-time.After(5 * time.Second):
-		return nil, fmt.Errorf("timeout khi chờ phản hồi từ peers")
+		return nil, fmt.Errorf("timeout khi chờ phản hồi từ tất cả peers")
 	}
 }
 

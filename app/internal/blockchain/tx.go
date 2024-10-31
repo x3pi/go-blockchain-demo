@@ -121,63 +121,49 @@ func VerifyTransactionSignature(tx *Transaction, publicKeyHex string) (bool, err
 
 // SaveTransactionToTrie lưu transaction vào trie
 func (bc *Blockchain) SaveTransactionToTrie(tx *Transaction) error {
-
-	fmt.Printf("Bắt đầu lưu giao dịch tx: %+v\n", tx)
-
 	txJSON, err := json.Marshal(tx)
 	if err != nil {
-		return fmt.Errorf("lỗi marshal transaction: %v", err)
+		return err
 	}
 
-	key := tx.ID
-	bc.txTrie.Update(key, txJSON)
-
-	fmt.Printf("Hoàn thành updte giao dịch tx: %+v\n", tx)
+	bc.txTrie.Update(tx.ID, txJSON)
 
 	root, nodes := bc.txTrie.Commit(false)
 	trieDB := triedb.NewDatabase(rawdb.NewDatabase(bc.db), &triedb.Config{})
 
-	// Log thông tin debug
-	fmt.Printf("Root hash: %x\n", root)
-
 	if err := trieDB.Update(root, common.Hash{}, 0, trienode.NewWithNodeSet(nodes), nil); err != nil {
-		return fmt.Errorf("lỗi khi cập nhật trieDB: %v", err)
+		return fmt.Errorf("lỗi khi cập nhật transaction trie: %v", err)
 	}
 
 	if err := trieDB.Commit(root, false); err != nil {
 		return fmt.Errorf("lỗi khi commit trie database: %v", err)
 	}
 
-	fmt.Printf("Hoàn thành cập nhật trieDB cho giao dịch: %+v\n", tx)
-	fmt.Printf("Bắt đầu lưu root hash cho giao dịch: %+v\n", root)
-
 	if err := bc.db.Put([]byte(TX_ROOT_HASH), root[:]); err != nil {
-		return fmt.Errorf("lỗi khi lưu root hash: %v", err)
+		return fmt.Errorf("lỗi khi lưu transaction root hash: %v", err)
 	}
 
-	// // Kiểm tra root hash đã được lưu
-	// savedRoot, err := bc.db.Get([]byte(TX_ROOT_HASH))
-	// if err != nil {
-	// 	return fmt.Errorf("lỗi khi đọc lại root hash: %v", err)
-	// }
-	// fmt.Printf("Saved root hash: %x\n", savedRoot)
-
-	// fmt.Printf("Bắt đầu khôi phục trie giao dịch với root hash: %x\n", root)
-
-	// Thử khôi phục trie
 	newTrie, err := bc.RestoreTrieFromRootHash(root)
 	if err != nil {
-		return fmt.Errorf("lỗi khôi phục trie (root: %x): %v", root, err)
+		return fmt.Errorf("lỗi khi khôi phục trie từ root hash: %v", err)
 	}
-
 	bc.txTrie = newTrie
-	fmt.Printf("Khôi phục trie thành công với root hash: %x\n", root)
 
 	return nil
 }
 
 // GetTransactionFromTrie lấy transaction từ trie
 func (bc *Blockchain) GetTransactionFromTrie(txID []byte) (*Transaction, error) {
+	if bc == nil {
+		return nil, fmt.Errorf("blockchain instance is nil")
+	}
+	if bc.txTrie == nil {
+		return nil, fmt.Errorf("transaction trie is nil")
+	}
+	if txID == nil {
+		return nil, fmt.Errorf("transaction ID is nil")
+	}
+
 	value, err := bc.txTrie.Get(txID)
 	if err != nil {
 		return nil, fmt.Errorf("lỗi khi lấy transaction: %v", err)
@@ -456,6 +442,7 @@ func (mp *Mempool) PrintMempool() {
 
 // ProcessMempoolTransactions xử lý tất cả các giao dịch trong mempool
 func (bc *Blockchain) ProcessMempoolTransactions() ([]string, error) {
+
 	// Lấy tất cả giao dịch từ mempool
 	transactions := bc.Mempool.GetAllTransactions()
 	successfulTxs := make([]string, 0)
@@ -464,51 +451,57 @@ func (bc *Blockchain) ProcessMempoolTransactions() ([]string, error) {
 	for _, tx := range transactions {
 		txID := hexutil.Encode(tx.ID)
 		fmt.Printf("Processing transaction -----------: %s\n", txID)
+
+		// Check if transaction already exists in trie
+		exists, err := bc.IsTransactionExist(tx.ID)
+		if err != nil {
+			return successfulTxs, fmt.Errorf("lỗi khi kiểm tra tồn tại của giao dịch %s: %v", txID, err)
+		}
+		if exists {
+			// Skip if transaction already exists
+			continue
+		}
 		// Lấy thông tin tài khoản người gửi và người nhận
 		fromAcc, err := bc.GetAccountFromTrie(tx.From)
 		if err != nil {
+			bc.Mempool.RemoveTransaction(txID) // Xóa khi có lỗi
 			return successfulTxs, fmt.Errorf("lỗi khi lấy tài khoản người gửi: %v: %v", fromAcc, err)
 		}
 
 		toAcc, err := bc.GetAccountFromTrie(tx.To)
 		if err != nil {
+			bc.Mempool.RemoveTransaction(txID) // Xóa khi có lỗi
 			return successfulTxs, fmt.Errorf("lỗi khi lấy tài khoản người nhận: %v: %v", toAcc, err)
 		}
 
-		// Kiểm tra số dư
+		// Kiểm tra số dư và xóa nếu không đủ
 		if fromAcc.Balance < tx.Amount {
 			bc.Mempool.RemoveTransaction(txID)
-			continue // Bỏ qua giao dịch này nếu không đủ số dư
+			continue
 		}
 
-		// Cập nhật số dư
+		// Cập nhật số dư và lưu vào trie
 		fromAcc.Balance -= tx.Amount
 		toAcc.Balance += tx.Amount
-
-		// Tăng nonce của tài khoản người gửi
 		fromAcc.IncrementNonce()
 
-		fmt.Printf("fromAcc: %+v\n", fromAcc)
-		fmt.Printf("toAcc: %+v\n", toAcc)
-		// Lưu các thay đổi vào trie
 		if err := bc.SaveAccountToTrie(fromAcc); err != nil {
+			bc.Mempool.RemoveTransaction(txID) // Xóa khi có lỗi
 			return successfulTxs, fmt.Errorf("lỗi khi cập nhật tài khoản người gửi: %v", err)
 		}
 
 		if err := bc.SaveAccountToTrie(toAcc); err != nil {
+			bc.Mempool.RemoveTransaction(txID) // Xóa khi có lỗi
 			return successfulTxs, fmt.Errorf("lỗi khi cập nhật tài khoản người nhận: %v", err)
 		}
 
-		// Lưu giao dịch vào trie
 		if err := bc.SaveTransactionToTrie(tx); err != nil {
+			bc.Mempool.RemoveTransaction(txID) // Xóa khi có lỗi
 			return successfulTxs, fmt.Errorf("lỗi khi lưu giao dịch: %v", err)
 		}
 
-		// Thêm transaction ID vào danh sách thành công
 		successfulTxs = append(successfulTxs, txID)
-
-		// Xóa giao dịch khỏi mempool
-		bc.Mempool.RemoveTransaction(txID)
+		bc.Mempool.RemoveTransaction(txID) // Xóa sau khi xử lý thành công
 		fmt.Printf("Hoàn tất giao dịch-------------------------------------------------------------: %s\n", txID)
 	}
 
@@ -518,26 +511,46 @@ func (bc *Blockchain) ProcessMempoolTransactions() ([]string, error) {
 // ProcessTransactionsByIDs xử lý danh sách giao dịch từ các ID
 func (bc *Blockchain) ProcessTransactionsByIDs(txIDs []string) error {
 	for _, txID := range txIDs {
+		// Decode txID from hex to bytes for checking existence
+		txIDBytes, err := hexutil.Decode(txID)
+		if err != nil {
+			return fmt.Errorf("lỗi khi decode txID %s: %v", txID, err)
+		}
+
+		// Check if transaction already exists in trie
+		exists, err := bc.IsTransactionExist(txIDBytes)
+		if err != nil {
+			return fmt.Errorf("lỗi khi kiểm tra tồn tại của giao dịch %s: %v", txID, err)
+		}
+		if exists {
+			// Skip if transaction already exists
+			continue
+		}
+
 		// Lấy giao dịch từ trie hoặc mempool
 		tx, err := bc.GetTransactionByID(txID)
 		if err != nil {
+			bc.Mempool.RemoveTransaction(txID) // Xóa giao dịch lỗi khỏi mempool
 			return fmt.Errorf("lỗi khi lấy giao dịch %s: %v", txID, err)
 		}
 
 		// Lấy thông tin tài khoản người gửi và người nhận
 		fromAcc, err := bc.GetAccountFromTrie(tx.From)
 		if err != nil {
+			bc.Mempool.RemoveTransaction(txID)
 			return fmt.Errorf("lỗi khi lấy tài khoản người gửi cho giao dịch %v: %v", fromAcc, err)
 		}
 
 		toAcc, err := bc.GetAccountFromTrie(tx.To)
 		if err != nil {
+			bc.Mempool.RemoveTransaction(txID)
 			return fmt.Errorf("lỗi khi lấy tài khoản người nhận cho giao dịch %v: %v", toAcc, err)
 		}
 
 		// Kiểm tra số dư
 		if fromAcc.Balance < tx.Amount {
-			continue // Bỏ qua giao dịch này nếu không đủ số dư
+			bc.Mempool.RemoveTransaction(txID) // Xóa giao dịch không đủ số dư
+			continue
 		}
 
 		// Cập nhật số dư
@@ -549,6 +562,7 @@ func (bc *Blockchain) ProcessTransactionsByIDs(txIDs []string) error {
 
 		// Lưu các thay đổi vào trie
 		if err := bc.SaveAccountToTrie(fromAcc); err != nil {
+			bc.Mempool.RemoveTransaction(txID)
 			return fmt.Errorf("lỗi khi cập nhật tài khoản người gửi cho giao dịch %s: %v", txID, err)
 		}
 
@@ -565,4 +579,26 @@ func (bc *Blockchain) ProcessTransactionsByIDs(txIDs []string) error {
 	}
 
 	return nil
+}
+
+// IsTransactionExist kiểm tra xem một giao dịch đã tồn tại trong trie database chưa
+func (bc *Blockchain) IsTransactionExist(txID []byte) (bool, error) {
+	if bc == nil {
+		return false, fmt.Errorf("blockchain instance is nil")
+	}
+	if bc.txTrie == nil {
+		return false, fmt.Errorf("transaction trie is nil")
+	}
+	if txID == nil {
+		return false, fmt.Errorf("transaction ID is nil")
+	}
+
+	// Thử lấy giao dịch từ trie
+	value, err := bc.txTrie.Get(txID)
+	if err != nil {
+		return false, fmt.Errorf("lỗi khi kiểm tra transaction: %v", err)
+	}
+
+	// Nếu value không nil, tức là giao dịch tồn tại
+	return value != nil, nil
 }
