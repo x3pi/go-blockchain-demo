@@ -217,5 +217,7 @@ Hệ thống được khởi tạo với ba tài khoản test:
     }'
 ```
 có thể thay cổng 8080 bằng 8081, 8082 cho các node khác nhau
-## Hệ thống chưa xử lý việc tự động tạo tài khoản lên chain khi lần đầu có giao dịch
+
+## Chú ý
+- Hệ thống chưa xử lý việc tự động tạo tài khoản mới lên chain khi lần đầu có giao dịch
 
