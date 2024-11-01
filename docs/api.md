@@ -202,7 +202,6 @@ Hệ thống được khởi tạo với ba tài khoản test:
    - Khóa công khai: 0x04d53415bd1e6941e971c2eb1f9a4e964dd8cb043a5865f023f004915aef78d462d61072e9448ea334070cc26460c471a6c6ca9bc82461c02ddea5ca2bf7c170f6
    - Số dư ban đầu: 1000
   - privateKeyHex: 9ba58faba7490a9164c3d2737f073ddb755739a839afa976b119d9e6d9f13efd
-```
 
 ## Ví dụ chuyển tiền từ tài khoản 1 sang tài khoản 2
 
@@ -217,6 +216,6 @@ Hệ thống được khởi tạo với ba tài khoản test:
         "privateKeyHex": "6f389f57a5bca725595e26972d8db9023fa092fe60b5e332760de48ffadc3dac"
     }'
 ```
-
+có thể thay cổng 8080 bằng 8081, 8082 cho các node khác nhau
 ## Hệ thống chưa xử lý việc tự động tạo tài khoản lên chain khi lần đầu có giao dịch
 
