@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"main/internal/api"
 	"main/internal/blockchain"
@@ -28,19 +29,21 @@ func main() {
 
 	// Tạo mảng nodes cho P2P network
 	var enodeNodes []string
-	for _, node := range bc.Config.Nodes { // Sử dụng bc.Config.Nodes
-		if node.Index != bc.Config.Index { // Kiểm tra điều kiện khác index
-			enodeNode := "enode://" + node.PublicKey + "@" + node.URL
-			enodeNodes = append(enodeNodes, enodeNode)
+	for _, node := range bc.Config.Nodes {
+		if node.Index != bc.Config.Index {
+			// Format enode URL with proper scheme and port
+			enodeURL := fmt.Sprintf("enode://%s@%s", node.PublicKey, node.URL)
+			log.Printf("Adding enode URL: %s", enodeURL)
+			enodeNodes = append(enodeNodes, enodeURL)
 		}
 	}
 
 	// Tạo cấu hình cho P2P network
 	p2pConfig := &p2pnetwork.Config{
 		PrivateKeyHex: privateKeyHex,
-		Nodes:         enodeNodes, // Sử dụng mảng nodes đã chuyển đổi
+		Nodes:         enodeNodes,
 		MaxPeers:      10,
-		Name:          "MyP2PNode",
+		Name:          fmt.Sprintf("Node%d", bc.Config.Index),
 		ListenAddr:    ":30303",
 	}
 

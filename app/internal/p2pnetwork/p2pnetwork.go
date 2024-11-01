@@ -56,7 +56,12 @@ func NewP2PNetwork(config *Config) (*P2PNetwork, error) {
 func (p *P2PNetwork) Start() error {
 	var nodes []*enode.Node
 	for _, nodeAddr := range p.Config.Nodes {
-		nodes = append(nodes, enode.MustParse(nodeAddr))
+		node, err := enode.ParseV4(nodeAddr)
+		if err != nil {
+			log.Printf("Warning: Failed to parse enode URL %s: %v", nodeAddr, err)
+			continue
+		}
+		nodes = append(nodes, node)
 	}
 
 	cfg := p2p.Config{
@@ -79,9 +84,10 @@ func (p *P2PNetwork) Start() error {
 
 	p.Server = &p2p.Server{Config: cfg}
 	if err := p.Server.Start(); err != nil {
-		return fmt.Errorf("không thể khởi động server: %v", err)
+		return fmt.Errorf("couldn't start server: %v", err)
 	}
 
+	// Start connection maintenance
 	go p.maintainConnections(nodes)
 
 	return nil
@@ -192,7 +198,7 @@ func (p *P2PNetwork) handleLastBlockRequests(peer *p2p.Peer, rw p2p.MsgReadWrite
 		case err := <-done:
 			if err != nil {
 				if err.Error() == "shutting down" || err.Error() == "use of closed network connection" {
-					log.Printf("Kết n���i với peer %v đã đóng, đang thử kết nối lại...", peer.ID())
+					log.Printf("Kết nối với peer %v đã đóng, đang thử kết nối lại...", peer.ID())
 					time.Sleep(5 * time.Second)
 				} else {
 					log.Printf("Lỗi khi gửi yêu cầu last block: %v", err)
@@ -471,8 +477,12 @@ const (
 	TransactionRequestMsg
 	TransactionResponseMsg
 	// Thêm hằng số cho retry
-	maxReconnectAttempts = 5
-	reconnectDelay       = 10 * time.Second
+	maxReconnectAttempts  = 5
+	reconnectDelay        = 10 * time.Second
+	initialReconnectDelay = 5 * time.Second
+	maxReconnectDelay     = 2 * time.Minute
+	reconnectJitterRange  = 1000 // milliseconds
+	healthCheckInterval   = 30 * time.Second
 )
 
 // Thêm các hàm xử lý mới
@@ -704,7 +714,7 @@ func (p *P2PNetwork) reconnectToPeer(node *enode.Node) error {
 			// Cập nhật lại peerRWs cho peer mới kết nối
 			if rw := p.getPeerRW(peer.ID().String()); rw != nil {
 				p.setPeerRW(peer.ID().String(), rw)
-				log.Printf("Đã cập nhật peerRW cho peer %v sau khi kết nối lại", peer.ID())
+				log.Printf("Đã cập nh��t peerRW cho peer %v sau khi kết nối lại", peer.ID())
 			}
 			return nil // Kết nối thành cng
 		}
@@ -733,121 +743,112 @@ func (p *P2PNetwork) getPeerRW(peerID string) p2p.MsgReadWriter {
 
 // Thêm hàm mới để duy trì kết nối
 func (p *P2PNetwork) maintainConnections(nodes []*enode.Node) {
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
+	reconnectDelay := initialReconnectDelay
+	healthCheckTicker := time.NewTicker(healthCheckInterval)
+	defer healthCheckTicker.Stop()
 
-	for range ticker.C {
-		currentPeers := p.Server.Peers()
-		connectedIDs := make(map[string]bool)
-
-		// Đánh dấu các peer đang kết nối
-		for _, peer := range currentPeers {
-			connectedIDs[peer.ID().String()] = true
+	// Add initial connection attempts with retry
+	for i := 0; i < 5; i++ {
+		if len(p.Server.Peers()) > 0 {
+			break
 		}
-
-		// Thử kết nối với các node đã ngắt kết nối
+		log.Printf("Attempting initial connections, attempt %d/5", i+1)
 		for _, node := range nodes {
-			nodeID := node.ID().String()
-			if !connectedIDs[nodeID] {
-				log.Printf("Node %v chưa kết nối, đang thử kết nối lại...", nodeID)
+			p.Server.AddPeer(node)
+		}
+		time.Sleep(5 * time.Second)
+	}
 
-				// Xóa hoàn toàn trạng thái cũ của peer
-				p.Server.RemovePeer(node)
-				p.cleanupPeerConnection(nodeID)
+	for {
+		select {
+		case <-healthCheckTicker.C:
+			currentPeers := p.Server.Peers()
+			if len(currentPeers) == 0 {
+				log.Println("No peers connected, attempting to restart P2P...")
 
-				// Đợi một chút để đảm bảo cleanup hoàn tất
-				time.Sleep(2 * time.Second)
-
-				// Thêm lại static node và thử kết nối
-				p.Server.AddPeer(node)
-
-				// Kiểm tra kết nối trong vòng lặp
-				for attempts := 0; attempts < 3; attempts++ {
-					time.Sleep(2 * time.Second)
-					if p.isPeerConnected(node.ID()) {
-						log.Printf("Đã kết nối lại thành công với node %v", nodeID)
-						break
+				if err := p.RestartP2PConnection(); err != nil {
+					log.Printf("Error restarting P2P: %v", err)
+					reconnectDelay *= 2
+					if reconnectDelay > maxReconnectDelay {
+						reconnectDelay = maxReconnectDelay
 					}
+					time.Sleep(reconnectDelay)
+					continue
+				}
+				reconnectDelay = initialReconnectDelay
+			}
+
+			// Check and reconnect to disconnected nodes
+			for _, node := range nodes {
+				if !p.isPeerConnected(node.ID()) {
+					go p.reconnectWithBackoffAndRetry(node)
 				}
 			}
 		}
 	}
 }
 
-// Thêm hàm mới để xử lý việc thử kết nối
-func (p *P2PNetwork) attemptReconnect(node *enode.Node) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	done := make(chan error, 1)
-	go func() {
-		// Xóa peer hiện có
-		p.Server.RemovePeer(node)
-		time.Sleep(time.Second)
-
-		// Thêm lại peer
-		p.Server.AddPeer(node)
-
-		// Đợi kết nối được thiết lập
-		checkTicker := time.NewTicker(500 * time.Millisecond)
-		defer checkTicker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-checkTicker.C:
-				for _, peer := range p.Server.Peers() {
-					if peer.Node().ID() == node.ID() {
-						// Xác minh kết nối đang hoạt động
-						if rw := p.getPeerRW(peer.ID().String()); rw != nil {
-							done <- nil
-							return
-						}
-					}
-				}
-			}
-		}
-	}()
-
-	select {
-	case err := <-done:
-		return err
-	case <-ctx.Done():
-		return fmt.Errorf("hết thời gian chờ khi đang thử kết nối lại")
-	}
-}
-
-func (p *P2PNetwork) reconnectWithBackoff(node *enode.Node) {
-	backoff := 1 * time.Second
-	maxBackoff := 30 * time.Second
-	maxAttempts := 5
+// Thêm hàm mới để xử lý kết nối lại với retry và backoff
+func (p *P2PNetwork) reconnectWithBackoffAndRetry(node *enode.Node) {
+	backoff := initialReconnectDelay
+	maxAttempts := 10
 	attempt := 0
 
 	for attempt < maxAttempts {
 		log.Printf("Đang thử kết nối lại với node %v (lần thử %d/%d)", node.ID(), attempt+1, maxAttempts)
 
-		if err := p.attemptReconnect(node); err == nil {
+		// Xóa peer cũ và cleanup
+		p.Server.RemovePeer(node)
+		p.cleanupPeerConnection(node.ID().String())
+		time.Sleep(2 * time.Second)
+
+		// Thêm jitter
+		jitter := time.Duration(rand.Int63n(reconnectJitterRange)) * time.Millisecond
+		actualBackoff := backoff + jitter
+
+		// Thử kết nối lại
+		p.Server.AddPeer(node)
+
+		// Đợi và kiểm tra kết nối
+		time.Sleep(actualBackoff)
+
+		if p.isPeerConnected(node.ID()) {
 			log.Printf("Đã kết nối lại thành công với node %v", node.ID())
 			return
 		}
 
 		attempt++
 		if attempt < maxAttempts {
-			// Thêm jitter vào backoff
-			jitter := time.Duration(rand.Int63n(int64(backoff)))
-			sleepTime := backoff + jitter
-
-			log.Printf("Kết nối lại thất bại, đợi %v trước lần thử tiếp theo", sleepTime)
-			time.Sleep(sleepTime)
-
-			// Tăng backoff theo cấp số nhân
 			backoff *= 2
-			if backoff > maxBackoff {
-				backoff = maxBackoff
+			if backoff > maxReconnectDelay {
+				backoff = maxReconnectDelay
 			}
+			log.Printf("Kết nối lại thất bại, đợi %v trước lần thử tiếp theo", backoff)
 		}
 	}
 
 	log.Printf("Không thể kết nối lại với node %v sau %d lần thử", node.ID(), maxAttempts)
+}
+
+// Thêm hàm mới để khởi động lại kết nối P2P
+func (p *P2PNetwork) RestartP2PConnection() error {
+	log.Println("Đang khởi động lại kết nối P2P...")
+
+	// Dừng server hiện tại nếu đang chạy
+	if p.Server != nil {
+		p.Server.Stop()
+		time.Sleep(5 * time.Second) // Đợi server dừng hoàn toàn
+	}
+
+	// Khởi tạo lại các map
+	p.peerRWMutex.Lock()
+	p.peerRWs = make(map[string]p2p.MsgReadWriter)
+	p.peerRWMutex.Unlock()
+
+	p.txChannelMutex.Lock()
+	p.txChannels = make(map[string]chan *blockchain.Transaction)
+	p.txChannelMutex.Unlock()
+
+	// Khởi động lại server với cấu hình mới
+	return p.Start()
 }
