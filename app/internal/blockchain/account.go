@@ -125,6 +125,7 @@ func (bc *Blockchain) InitializeTestAccounts() error {
 	// Thêm "0x" prefix nếu chưa có
 	pubKey1 := "0x048f1273da4d7c042caa74c4fe50443831875128a8ff7817c40f1211cdf6e65e63e5ce5139da1983946cb15a054d951559523d7121ae9d0314f5e187cc757b36e2"
 	pubKey2 := "0x04127bae1dc0022eabf3fc16447d501fa45906d5127d116de654b6e93b0606ee9430552b8f458d905459396d581b9201b7745edf1d2f47a84aed5e063cc196942b"
+	pubKey3 := "0x04d53415bd1e6941e971c2eb1f9a4e964dd8cb043a5865f023f004915aef78d462d61072e9448ea334070cc26460c471a6c6ca9bc82461c02ddea5ca2bf7c170f6"
 
 	// Khởi tạo account thứ nhất với số dư ban đầu
 	acc1, err := NewAccountFromPublicKey(pubKey1, 1000)
@@ -161,6 +162,24 @@ func (bc *Blockchain) InitializeTestAccounts() error {
 			return fmt.Errorf("lỗi lưu account 2: %v", err)
 		}
 		fmt.Printf("Đã tạo mới account 2: %s\n", acc2.Address)
+	}
+
+	// Khởi tạo account thứ ba với số dư ban đầu
+	acc3, err := NewAccountFromPublicKey(pubKey3, 1000)
+	if err != nil {
+		return fmt.Errorf("lỗi khởi tạo account 3: %v", err)
+	}
+
+	// Kiểm tra account 3 đã tồn tại chưa
+	existingAcc3, err := bc.GetAccountFromTrie(acc3.Address)
+	if err == nil && existingAcc3 != nil {
+		fmt.Printf("Account 3 đã tồn tại: %s\n", acc3.Address)
+	} else {
+		// Lưu account 3 vào trie nếu chưa tồn tại
+		if err := bc.SaveAccountToTrie(acc3); err != nil {
+			return fmt.Errorf("lỗi lưu account 3: %v", err)
+		}
+		fmt.Printf("Đã tạo mới account 3: %s\n", acc3.Address)
 	}
 
 	return nil
