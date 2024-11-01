@@ -9,6 +9,10 @@ Trong thư mục `bls-demo` có các ví dụ sử dụng về chữ ký BLS:
 
 [Xem thêm tài liệu chi tiết về BLS](https://github.com/x3pi/go-blockchain-demo/blob/main/docs/bls-demo.md)
 
+# API
+
+[Xem thêm tài liệu chi tiết về API](https://github.com/x3pi/go-blockchain-demo/blob/main/docs/api.md)
+
 
 # Blockchain P2P
 
