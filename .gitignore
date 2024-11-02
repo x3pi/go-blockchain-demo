@@ -22,4 +22,9 @@ go.work.sum
 Thumbs.db
 
 app/cmd/test
-app/cmd/node/leveldb_data
+app/cmd/node*/leveldb_data
+app/cmd/node/config.json
+app/cmd/node2/node.go
+app/cmd/node2/config.json
+app/cmd/node1/node.go
+app/cmd/node1/config.json

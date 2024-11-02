@@ -3,13 +3,21 @@
 	"index": 1,
 	"nodes": [
 		{
+			"publicKey": "127bae1dc0022eabf3fc16447d501fa45906d5127d116de654b6e93b0606ee9430552b8f458d905459396d581b9201b7745edf1d2f47a84aed5e063cc196942b",
+			"url": "localhost:30303",
+			"apiUrl": "localhost:8080",
+			"index": 1	
+		},
+		{
 			"publicKey": "8f1273da4d7c042caa74c4fe50443831875128a8ff7817c40f1211cdf6e65e63e5ce5139da1983946cb15a054d951559523d7121ae9d0314f5e187cc757b36e2",
-			"url": "host.docker.internal:30304",
+			"url": "localhost:30304",
+			"apiUrl": "localhost:8081",
 			"index": 2
 		},
 		{
 			"publicKey": "d53415bd1e6941e971c2eb1f9a4e964dd8cb043a5865f023f004915aef78d462d61072e9448ea334070cc26460c471a6c6ca9bc82461c02ddea5ca2bf7c170f6",
-			"url": "host.docker.internal:30305",
+			"url": "localhost:30305",
+			"apiUrl": "localhost:8082",
 			"index": 3
 		}
 	]
